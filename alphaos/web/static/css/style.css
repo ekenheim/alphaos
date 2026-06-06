@@ -308,6 +308,9 @@ tr.expand-row > td { background: var(--panel-2); padding: 0; }
 .expand-inner .subcard-title { margin-bottom: 8px; }
 .side-long  { color: var(--pos); }
 .side-short { color: var(--neg); }
+td.pos { color: var(--pos); }
+td.neg { color: var(--neg); }
+tr.clickable.expanded { background: var(--panel-2); }
 .pill.ok { color: var(--pos); border-color: rgba(52,211,153,0.25); }
 
 /* --- Footer --- */

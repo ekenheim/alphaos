@@ -10,8 +10,9 @@ Image: **`ghcr.io/ekenheim/alphaos`**
 
 A FastAPI app (`alphaos.server:app`) serving the **V2-FRONTIER portfolio
 tracker** — a web dashboard + JSON APIs on port **8503**. All state (sleeves,
-holdings, portfolio config, NAV-index ledger) lives in **PostgreSQL** (see
-_Database (Crunchy Postgres)_ below).
+the transactions ledger, the holdings derived from it, portfolio config,
+NAV-index ledger) lives in **PostgreSQL** (see _Database (Crunchy Postgres)_
+below).
 
 > **MinIO / S3 is used again — but only read-only, and only for daily closes of
 > US stocks** (bucket `stocks-us`). It is **optional**: the app works without it
@@ -74,7 +75,8 @@ The container is configured entirely via environment variables. The only
 ## Database (Crunchy Postgres)
 
 The app needs a **PostgreSQL** database. It holds the entire portfolio state:
-sleeves, holdings, the portfolio config singleton, and the NAV-index ledger.
+sleeves, the transactions ledger, the holdings derived from it, the portfolio
+config singleton, and the NAV-index ledger.
 
 The image already bundles the required deps (`sqlalchemy`,
 `psycopg[binary]`, `alembic`) — they're declared in `pyproject.toml` /
@@ -150,6 +152,10 @@ then seed the sleeves:
 alphaos db upgrade   # apply Alembic migrations (creates/updates tables)
 alphaos db seed      # populate the five default V2-FRONTIER sleeves (idempotent)
 ```
+
+> Migration **0005** adds the **`transactions`** table (the ledger that holdings
+> are derived from). Existing deployments pick it up on the next `alphaos db
+> upgrade` — run it before rolling out the new image.
 
 The recommended place for this in your k8s repo is an **initContainer** that
 shares the same image and the same DB env as the main container:

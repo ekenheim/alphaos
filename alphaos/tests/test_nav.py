@@ -108,11 +108,17 @@ def test_allocation_weights_drift_and_rebalance(session):
     seed_default_sleeves(session)
 
     # Put holdings across sleeves with deliberately off-target values.
-    upsert_holding(session, sleeve_code="CNDX", symbol="CNDX", market_value=300_000)
-    upsert_holding(session, sleeve_code="VVSM", symbol="VVSM", market_value=100_000)
-    upsert_holding(session, sleeve_code="RAW", symbol="AAPL", market_value=400_000)
-    upsert_holding(session, sleeve_code="CA", symbol="IDTL", market_value=100_000)
-    upsert_holding(session, sleeve_code="LOWVOL", symbol="BAB", market_value=100_000)
+    # Holdings are valued qty * price * FX; with qty=1, SEK last_price, FX=1 the
+    # market value equals last_price.
+    def _hold(code, symbol, value):
+        upsert_holding(session, sleeve_code=code, symbol=symbol,
+                       currency="SEK", quantity=1, last_price=value)
+
+    _hold("CNDX", "CNDX", 300_000)
+    _hold("VVSM", "VVSM", 100_000)
+    _hold("RAW", "AAPL", 400_000)
+    _hold("CA", "IDTL", 100_000)
+    _hold("LOWVOL", "BAB", 100_000)
 
     assert total_gross_value(session) == Decimal("1000000")
 

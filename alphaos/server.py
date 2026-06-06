@@ -35,9 +35,10 @@ from .db import config as dbconfig
 from .db import allocation as dballoc
 from .db import nav as dbnav
 from .db import fx as dbfx, pricing as dbpricing, importer as dbimporter
+from .db import transactions as dbtx
 from .db.serialize import (
     jsonable, sleeve_to_dict, holding_to_dict, nav_snapshot_to_dict,
-    config_to_dict,
+    config_to_dict, transaction_to_dict,
 )
 
 _DB_UNCONFIGURED = JSONResponse(status_code=503, content={"error": "database not configured"})
@@ -244,19 +245,9 @@ async def import_tx(file: UploadFile = File(...), preview: bool = False) -> JSON
     content = await file.read()
     try:
         if preview:
-            parsed = dbimporter.parse_avanza_csv(content)
-            holdings = parsed.get("holdings", [])
-            summary = {
-                "deposits_total": parsed.get("deposits_total"),
-                "date_min": parsed.get("date_min"),
-                "date_max": parsed.get("date_max"),
-                "rows": parsed.get("rows"),
-                "holdings_count": len(holdings),
-            }
             return JSONResponse(jsonable({
                 "preview": True,
-                "summary": summary,
-                "holdings": holdings,
+                **dbimporter.preview_import(content),
             }))
         with session_scope() as session:
             result = dbimporter.import_transactions(session, content)
@@ -264,6 +255,63 @@ async def import_tx(file: UploadFile = File(...), preview: bool = False) -> JSON
         return JSONResponse(payload)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+# --- Transactions / history ---
+
+@app.get("/api/transactions")
+def get_transactions(isin: str | None = None, limit: int | None = None) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        txns = dbtx.list_transactions(session, isin=isin, limit=limit)
+        return JSONResponse({"transactions": [transaction_to_dict(t) for t in txns]})
+
+
+@app.post("/api/transactions")
+async def post_transaction(request: Request) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    body = await request.json()
+    try:
+        with session_scope() as session:
+            txn = dbtx.add_transaction(
+                session,
+                date=body["date"],
+                isin=body["isin"],
+                kind=body["kind"],
+                quantity=body["quantity"],
+                price=body["price"],
+                currency=body.get("currency", "SEK"),
+                amount_sek=body.get("amount_sek"),
+                fees_sek=body.get("fees_sek", 0),
+                symbol=body.get("symbol"),
+                name=body.get("name"),
+                note=body.get("note"),
+            )
+            payload = {"transaction": transaction_to_dict(txn)}
+        return JSONResponse(payload)
+    except (ValueError, KeyError) as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.delete("/api/transactions/{txn_id}")
+def delete_transaction(txn_id: int) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        return JSONResponse({"deleted": dbtx.delete_transaction(session, txn_id)})
+
+
+@app.get("/api/history")
+def get_history(isin: str) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        return JSONResponse(jsonable({
+            "isin": isin,
+            "history": dbtx.position_history(session, isin),
+        }))
 
 
 @app.post("/api/fx/refresh")

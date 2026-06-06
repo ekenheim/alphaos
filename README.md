@@ -3,9 +3,9 @@
 Self-contained Python package that tracks the **V2-FRONTIER** portfolio: a
 leveraged, multi-sleeve allocation run on an **Avanza ISK** account in **SEK**.
 It is a FastAPI + static HTML/CSS/JS dashboard backed by a **PostgreSQL** store
-that holds the sleeve allocation, the holdings, the portfolio config (risk /
-leverage parameters) and the **NAV-index ledger** used to drive the binding
-de-lever rule.
+that holds the sleeve allocation, the **transactions ledger** (from which the
+holdings are derived), the portfolio config (risk / leverage parameters) and the
+**NAV-index ledger** used to drive the binding de-lever rule.
 
 This is a **tracker and risk cockpit**, not a trading engine. It does not place
 orders or run backtests — you record holdings and NAV snapshots, and it computes
@@ -86,11 +86,28 @@ at a **25% cliff** — Avanza's margin headroom before forced action. The glide
 path keeps normal operation well inside this; the dashboard surfaces it as a
 guardrail.
 
-## Holdings, cost basis & market value
+## Transactions ledger & derived positions
 
-Each holding records a **purchase price** (`avg_price`, in the instrument's own
-currency) and an **exact SEK cost basis** (`cost_basis_sek`). The **market
-value** is no longer a stored field — it is **computed**:
+Positions are a **derived view of a transactions ledger** — every buy and sell
+is a row (date, ISIN, kind, quantity, price, currency, SEK amount, fees, source,
+note). A holding's **quantity**, **average price** (`avg_price`), **SEK cost
+basis** (`cost_basis_sek`) and **acquired date** are **computed (average-cost)**
+from that ledger; they are **read-only** in the UI. You **change a position by
+adding a transaction** — via CSV import or the **manual rebalance form** — not by
+editing a quantity directly. Each ISIN's holding is recomputed automatically when
+its transactions change. Editing a holding now only sets **metadata** (sleeve,
+symbol, name, asset class, last price).
+
+The **Transactions** page lists the full ledger and lets you add or delete rows;
+the **Holdings** page shows per-position **history** — the running quantity over
+time (e.g. `10 → 12 → 8`) as each buy/sell is applied.
+
+> The ledger lives in the **`transactions`** table added by **migration 0005** —
+> run `alphaos db upgrade` after pulling this version to create it.
+
+## Cost basis & market value
+
+The **market value** is not a stored field — it is **computed**:
 
 ```
 market_value (SEK) = quantity × price × FX
@@ -136,10 +153,12 @@ holdings by hand. On the Holdings page, upload the CSV and you get a **preview**
 first (parsed holdings, total deposits, date range, row count) with no database
 writes; confirm to apply.
 
-The import is **idempotent**: it recomputes the net quantity and average cost
-from the **full transaction history** in the file and **SETS** each holding,
-matched by **ISIN** — preserving any existing `sleeve_id` and `symbol`.
-Re-importing the same export does **not** double quantities or deposits.
+The import **persists the individual buy/sell rows** into the transactions ledger
+(`source='avanza'`) and recomputes the affected holdings from them. It is
+**idempotent**: re-importing a full export **replaces that date range** of Avanza
+rows, so quantities and deposits are **not** doubled. Any **manual transactions
+are preserved** — only the `avanza`-sourced rows in the file's date range are
+replaced. Holding metadata (`sleeve_id`, `symbol`, …) is preserved across imports.
 
 > **Privacy:** the transaktioner CSV is **personal data**. It is **gitignored**
 > and must **never be committed** — it is only ever uploaded to your running
@@ -174,7 +193,8 @@ Python 3.10+. The app requires a PostgreSQL database — configure it via
 |----------------------|------------------------------------------------------------------------------|
 | `/` (Overview / Risk)| NAV index + drawdown curve, current TWR, leverage, belåningsgrad, de-lever status, distance to the −57% forced-sale line, glide-path target |
 | `/allocation.html`   | Sleeves table: target vs current weight, drift, rebalance delta; total gross value; any unassigned holdings |
-| `/holdings.html`     | All holdings per sleeve (symbol, ISIN, asset class, quantity, purchase price, cost basis, last price + source, computed market value, unrealized P&L, weight); add / edit / delete; **import an Avanza transaktioner CSV** (with preview) |
+| `/holdings.html`     | All holdings per sleeve (symbol, ISIN, asset class, quantity, purchase price, cost basis, last price + source, computed market value, unrealized P&L, weight). Quantity / avg price / cost basis are **derived from the ledger (read-only)**; edit sets metadata only. Per-position **history** (running quantity over time); **import an Avanza transaktioner CSV** (with preview) |
+| `/transactions.html` | **Transactions ledger**: every buy/sell (date, ISIN, kind, quantity, price, currency, SEK amount, fees, source, note); add a manual transaction or delete a row (the affected holding is recomputed) |
 | `/nav.html`          | **NAV ledger**: every snapshot (gross, loan, net contribution, equity, TWR, NAV index, peak, drawdown, leverage, belåningsgrad, de-lever status); add a snapshot |
 | `/config.html` (Settings) | Portfolio config: leverage target/floor, glide bands, de-lever thresholds, belåningsgrad cliff, currency / account label, **FX rates (USD/EUR→SEK) — editable, with as-of + source** |
 
@@ -205,13 +225,17 @@ alphaos prices refresh   # pull latest US-stock daily closes from MinIO (stocks-
 | `GET /api/holdings`               | List holdings (optionally filtered by sleeve) |
 | `POST /api/holdings`              | Create / update a holding |
 | `DELETE /api/holdings/{id}`       | Delete a holding |
+| `GET /api/transactions`           | List ledger transactions (optionally filtered by `?isin=`) |
+| `POST /api/transactions`          | Add a manual transaction (inserts + recomputes that ISIN's holding) |
+| `DELETE /api/transactions/{id}`   | Delete a transaction (removes + recomputes the affected holding) |
+| `GET /api/history?isin=`          | Per-position history for an ISIN: each buy/sell with the **running quantity** over time |
 | `GET /api/nav`                    | NAV snapshots (the ledger) + current risk |
 | `POST /api/nav`                   | Add a NAV snapshot |
 | `GET /api/sleeves`                | List sleeves |
 | `POST /api/sleeves`               | Upsert a sleeve (e.g. edit a target weight) |
 | `GET /api/config`                 | Portfolio config singleton |
 | `POST /api/config`                | Update portfolio config fields (incl. manual FX rates) |
-| `POST /api/import/transactions`   | Import an Avanza transaktioner CSV (idempotent recompute+SET by ISIN); `?preview` parses only and returns the preview without writing |
+| `POST /api/import/transactions`   | Import an Avanza transaktioner CSV into the ledger (idempotent: replaces the file's `avanza` date range, preserves manual rows, recomputes holdings); `?preview` parses only and returns the preview without writing |
 | `POST /api/fx/refresh`            | Fetch USD/EUR→SEK (Riksbank, ECB fallback) and cache in config |
 | `POST /api/prices/refresh`        | Pull latest US-stock daily closes from MinIO and set holding prices |
 
@@ -228,9 +252,10 @@ alphaos/
 ├── db/                  # PostgreSQL layer
 │   ├── __init__.py      # session_scope, have_database, db_status, models/enums
 │   ├── engine.py        # connection from env (DATABASE_URL / PG*), psycopg3
-│   ├── models.py        # Sleeve, Holding, NavSnapshot, PortfolioConfig + enums
+│   ├── models.py        # Sleeve, Holding, Transaction, NavSnapshot, PortfolioConfig + enums (TransactionKind, TxnSource)
 │   ├── config.py        # config singleton + glide-path target_leverage() + FX fields
-│   ├── allocation.py    # sleeves / holdings CRUD + allocation() drift report
+│   ├── allocation.py    # sleeves / holdings CRUD + allocation() drift report (qty/avg/cost derived)
+│   ├── transactions.py  # ledger: list / add / delete / position_history / recompute_holdings
 │   ├── nav.py           # add_snapshot / latest / list / current_risk (TWR, DD)
 │   ├── fx.py            # refresh_fx / fetch_rates / fx_to_sek (Riksbank, ECB fallback)
 │   ├── pricing.py       # MinIO closes: have_credentials / latest_closes / refresh_prices

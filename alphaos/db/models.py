@@ -75,6 +75,16 @@ class PriceSource(str, enum.Enum):
     none = "none"             # not priced
 
 
+class TransactionKind(str, enum.Enum):
+    buy = "buy"
+    sell = "sell"
+
+
+class TxnSource(str, enum.Enum):
+    avanza = "avanza"          # imported from an Avanza transaktioner CSV
+    manual = "manual"          # entered in-app (e.g. a rebalance leg)
+
+
 def _utcnow() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
@@ -179,6 +189,35 @@ class Holding(Base):
     )
 
     sleeve: Mapped["Sleeve | None"] = relationship(back_populates="holdings")
+
+
+class Transaction(Base):
+    """The ledger: one row per buy/sell. Holdings (qty/avg/cost/acquired) are
+    DERIVED by aggregating these (average-cost). Source 'avanza' rows come from a
+    CSV import (replaced by date range on re-import); 'manual' rows are entered
+    in-app (e.g. a rebalance leg)."""
+
+    __tablename__ = "transactions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date: Mapped[dt.date] = mapped_column(Date, index=True)
+    isin: Mapped[str] = mapped_column(String(16), index=True)
+    symbol: Mapped[str | None] = mapped_column(String(32), default=None)
+    name: Mapped[str | None] = mapped_column(String(160), default=None)
+    currency: Mapped[str] = mapped_column(String(8), default="SEK")
+    kind: Mapped[TransactionKind] = mapped_column(Enum(TransactionKind, name="transaction_kind"))
+    quantity: Mapped[float] = mapped_column(QTY)            # positive magnitude
+    price: Mapped[float] = mapped_column(PRICE)             # instrument ccy per unit
+    amount_sek: Mapped[float | None] = mapped_column(MONEY, default=None)  # CSV Belopp (signed)
+    fees_sek: Mapped[float] = mapped_column(MONEY, default=0)
+    fx_rate: Mapped[float | None] = mapped_column(RATIO, default=None)     # CSV Valutakurs
+    source: Mapped[TxnSource] = mapped_column(
+        Enum(TxnSource, name="txn_source"), default=TxnSource.manual, index=True
+    )
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
 
 class NavSnapshot(Base):

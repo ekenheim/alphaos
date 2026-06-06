@@ -25,6 +25,9 @@ from .models import (
     PriceSource,
     Sleeve,
     SleeveKind,
+    Transaction,
+    TransactionKind,
+    TxnSource,
 )
 
 __all__ = [
@@ -41,6 +44,9 @@ __all__ = [
     "Holding",
     "AssetClass",
     "PriceSource",
+    "Transaction",
+    "TransactionKind",
+    "TxnSource",
     "NavSnapshot",
     "DeleverStatus",
 ]

@@ -1,4 +1,9 @@
-"""Unit tests for the Avanza CSV importer (parse + cost-basis reconstruction).
+"""Unit tests for the Avanza CSV importer in its LEDGER form.
+
+The importer now feeds the transaction ledger: `parse_avanza_csv` yields raw
+buy/sell rows (holdings are derived later), `import_transactions` persists those
+rows by replacing the file's date range and recomputes derived holdings, and
+`preview_import` shows what would happen without ever touching the DB.
 
 Everything runs against a fresh in-memory SQLite DB and a small INLINE CSV
 string (never the real export file), so the suite is fast and deterministic.
@@ -9,17 +14,17 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from alphaos.db.models import Base
+from alphaos.db.models import Base, Holding, Transaction, TransactionKind, TxnSource
 from alphaos.db.allocation import (
     get_holding_by_isin,
     list_holdings,
     upsert_holding,
     upsert_sleeve,
 )
-from alphaos.db.importer import import_transactions, parse_avanza_csv
+from alphaos.db.importer import import_transactions, parse_avanza_csv, preview_import
 
 
 def _dec(value) -> Decimal:
@@ -65,31 +70,44 @@ def session():
         engine.dispose()
 
 
+def _count(session: Session, model) -> int:
+    return int(session.scalar(select(func.count()).select_from(model)))
+
+
 # --------------------------------------------------------------------------- #
-# parse_avanza_csv (pure)
+# parse_avanza_csv (pure: transaction rows, deposits, date range)
 # --------------------------------------------------------------------------- #
 
-def test_parse_buy_then_partial_sell_cost_basis():
+def test_parse_returns_buy_sell_transaction_rows():
     res = parse_avanza_csv(_csv())
-    holdings = {h["isin"]: h for h in res["holdings"]}
 
-    # ISIN1 survives with the partial position.
-    h1 = holdings["SE0000000001"]
-    assert _dec(h1["quantity"]) == Decimal("150")
-    # avg purchase price is the weighted avg of the two BUYS (60), untouched by the sell.
-    assert _dec(h1["avg_price"]) == Decimal("60")
-    # cost basis reduced proportionally: 12000 * (150/200) = 9000.
-    assert _dec(h1["cost_basis_sek"]) == Decimal("9000")
-    assert h1["currency"] == "SEK"
-    assert h1["name"] == "Alpha AB"
+    # parse no longer derives holdings; it yields raw ledger rows.
+    assert "holdings" not in res
+    txns = res["transactions"]
+    # 3 buys + 2 sells == 5 rows; the two Insättning rows are NOT transactions.
+    assert len(txns) == 5
 
+    kinds = sorted(t["kind"] for t in txns)
+    assert kinds == ["buy", "buy", "buy", "sell", "sell"]
 
-def test_parse_fully_sold_isin_excluded():
-    res = parse_avanza_csv(_csv())
-    isins = {h["isin"] for h in res["holdings"]}
-    # ISIN2 was bought then fully sold -> not a current holding.
-    assert "SE0000000002" not in isins
-    assert isins == {"SE0000000001"}
+    by_isin: dict[str, list] = {}
+    for t in txns:
+        by_isin.setdefault(t["isin"], []).append(t)
+    assert set(by_isin) == {"SE0000000001", "SE0000000002"}
+
+    # ISIN1: two buys (100@50, 100@70) and one sell (50@80), each a Decimal.
+    isin1 = by_isin["SE0000000001"]
+    assert len(isin1) == 3
+    buys = sorted((t for t in isin1 if t["kind"] == "buy"), key=lambda t: t["price"])
+    assert [(_dec(b["quantity"]), _dec(b["price"])) for b in buys] == [
+        (Decimal("100"), Decimal("50")),
+        (Decimal("100"), Decimal("70")),
+    ]
+    sell = next(t for t in isin1 if t["kind"] == "sell")
+    # Antal is stored as a positive magnitude even though the CSV is "-50".
+    assert _dec(sell["quantity"]) == Decimal("50")
+    assert sell["name"] == "Alpha AB"
+    assert sell["currency"] == "SEK"
 
 
 def test_parse_deposits_and_date_range():
@@ -97,58 +115,62 @@ def test_parse_deposits_and_date_range():
     assert _dec(res["deposits_total"]) == Decimal("15000")
     assert res["date_min"] == "2026-01-05"
     assert res["date_max"] == "2026-05-01"
+    # rows == every data line in the file (deposits included).
     assert res["rows"] == 7
 
 
 # --------------------------------------------------------------------------- #
-# import_transactions (DB) + idempotency
+# import_transactions (DB) — persists ledger, derives holdings
 # --------------------------------------------------------------------------- #
 
-def test_import_creates_holdings(session):
+def test_import_persists_transactions_and_derives_holdings(session):
     res = import_transactions(session, _csv())
-    assert res["created"] == 1
-    assert res["updated"] == 0
+
+    # All 5 buy/sell rows landed in the ledger.
+    assert res["transactions_imported"] == 5
+    assert _count(session, Transaction) == 5
+    # Only ISIN1 is still open -> exactly one derived holding.
     assert res["holdings_count"] == 1
     assert res["deposits_total"] == pytest.approx(15000.0)
     assert res["date_min"] == "2026-01-05"
     assert res["date_max"] == "2026-05-01"
 
-    # Only the surviving ISIN landed in the DB.
-    rows = list_holdings(session)
-    assert len(rows) == 1
+    # Ledger rows are tagged as the avanza source.
+    assert all(t.source is TxnSource.avanza for t in session.scalars(select(Transaction)))
+
+    open_holdings = [h for h in list_holdings(session) if _dec(h.quantity) > 0]
+    assert len(open_holdings) == 1
     h = get_holding_by_isin(session, "SE0000000001")
     assert h is not None
     assert _dec(h.quantity) == Decimal("150")
     assert _dec(h.avg_price) == Decimal("60")
     assert _dec(h.cost_basis_sek) == Decimal("9000")
+    assert h.acquired_at.isoformat() == "2026-01-10"
 
 
-def test_import_is_idempotent(session):
+def test_import_is_idempotent_replace_by_range(session):
     first = import_transactions(session, _csv())
-    assert first["created"] == 1
+    assert first["transactions_imported"] == 5
 
-    h_after_first = get_holding_by_isin(session, "SE0000000001")
-    qty1 = _dec(h_after_first.quantity)
-    avg1 = _dec(h_after_first.avg_price)
-    cost1 = _dec(h_after_first.cost_basis_sek)
+    txn_count_1 = _count(session, Transaction)
+    h1 = get_holding_by_isin(session, "SE0000000001")
+    snap_1 = (_dec(h1.quantity), _dec(h1.avg_price), _dec(h1.cost_basis_sek))
+    assert txn_count_1 == 5
 
-    # Re-import the SAME csv -> nothing new, no doubling.
+    # Re-import the SAME csv -> replace-by-range, so the ledger COUNT is unchanged.
     second = import_transactions(session, _csv())
-    assert second["created"] == 0
-    assert second["updated"] == 1
+    assert second["transactions_imported"] == 5
     assert second["holdings_count"] == 1
+    assert _count(session, Transaction) == txn_count_1 == 5
 
-    rows = list_holdings(session)
-    assert len(rows) == 1
-
-    h_after_second = get_holding_by_isin(session, "SE0000000001")
-    assert _dec(h_after_second.quantity) == qty1 == Decimal("150")
-    assert _dec(h_after_second.avg_price) == avg1 == Decimal("60")
-    assert _dec(h_after_second.cost_basis_sek) == cost1 == Decimal("9000")
+    # Derived holdings are identical (no doubling of qty / cost).
+    h2 = get_holding_by_isin(session, "SE0000000001")
+    assert (_dec(h2.quantity), _dec(h2.avg_price), _dec(h2.cost_basis_sek)) == snap_1
+    assert snap_1 == (Decimal("150"), Decimal("60"), Decimal("9000"))
 
 
-def test_import_preserves_existing_sleeve_and_symbol(session):
-    # Pre-existing holding matched by ISIN, with a sleeve + ticker already assigned.
+def test_import_preserves_holding_metadata(session):
+    # Pre-existing holding (matched by ISIN) carrying a sleeve + ticker.
     sleeve = upsert_sleeve(session, "RAW", name="RAW", target_weight=Decimal("0.45"))
     upsert_holding(
         session,
@@ -156,17 +178,46 @@ def test_import_preserves_existing_sleeve_and_symbol(session):
         symbol="ALPH",
         isin="SE0000000001",
         name="Alpha AB",
-        currency="SEK",
-        quantity=Decimal("1"),
     )
 
     import_transactions(session, _csv())
 
     h = get_holding_by_isin(session, "SE0000000001")
-    # Import overwrote qty/cost from the file history but kept sleeve + symbol.
+    # qty/cost are derived from the ledger; sleeve + symbol metadata survive.
     assert h.sleeve_id == sleeve.id
     assert h.symbol == "ALPH"
     assert _dec(h.quantity) == Decimal("150")
     assert _dec(h.avg_price) == Decimal("60")
-    # Still a single holding (matched, not duplicated).
+    # Matched, not duplicated.
     assert len(list_holdings(session)) == 1
+
+
+# --------------------------------------------------------------------------- #
+# preview_import (pure: summary + holdings, never writes)
+# --------------------------------------------------------------------------- #
+
+def test_preview_reports_summary_and_holdings_without_writing(session):
+    before_txns = _count(session, Transaction)
+    before_holdings = _count(session, Holding)
+
+    preview = preview_import(_csv())
+
+    summary = preview["summary"]
+    assert summary["transactions"] == 5
+    assert summary["holdings_count"] == 1
+    assert summary["deposits_total"] == pytest.approx(15000.0)
+    assert summary["date_min"] == "2026-01-05"
+    assert summary["date_max"] == "2026-05-01"
+    assert summary["rows"] == 7
+
+    # Preview derives the same open position as the real import would.
+    holdings = {h["isin"]: h for h in preview["holdings"]}
+    assert set(holdings) == {"SE0000000001"}          # fully-sold ISIN2 excluded
+    h1 = holdings["SE0000000001"]
+    assert _dec(h1["quantity"]) == Decimal("150")
+    assert _dec(h1["avg_price"]) == Decimal("60")
+    assert _dec(h1["cost_basis_sek"]) == Decimal("9000")
+
+    # The DB is untouched: row counts are exactly what they were before.
+    assert _count(session, Transaction) == before_txns == 0
+    assert _count(session, Holding) == before_holdings == 0

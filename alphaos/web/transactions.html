@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AlphaOS — Transactions</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="/static/js/common.js" defer></script>
+  <script src="/static/js/transactions.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◆</span>
+      <span class="brand-name">AlphaOS</span>
+      <span class="brand-sub">V2-FRONTIER</span>
+    </div>
+    <nav class="nav">
+      <a href="/" class="nav-link">Overview</a>
+      <a href="/allocation.html" class="nav-link">Allocation</a>
+      <a href="/holdings.html" class="nav-link">Holdings</a>
+      <a href="/transactions.html" class="nav-link active">Transactions</a>
+      <a href="/nav.html" class="nav-link">NAV ledger</a>
+      <a href="/config.html" class="nav-link">Settings</a>
+    </nav>
+    <div class="env">
+      <span class="pill" id="db-chip" title="database">DB …</span>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <div id="notice" class="notice hidden"></div>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Record transaction / rebalance</h2>
+        <div class="card-sub">POST /api/transactions · manual buy/sell · holdings recompute from the ledger · SEK</div>
+        <div class="card-actions">
+          <span class="pill" id="tx-count">— rows</span>
+        </div>
+      </div>
+      <form id="tx-form" class="form-grid" autocomplete="off">
+        <div class="field">
+          <label for="f-date">Date</label>
+          <input id="f-date" type="date" required />
+        </div>
+        <div class="field">
+          <label for="f-isin">ISIN</label>
+          <input id="f-isin" type="text" placeholder="IE00B53SZB19" required />
+        </div>
+        <div class="field">
+          <label for="f-kind">Kind</label>
+          <select id="f-kind">
+            <option value="buy">buy</option>
+            <option value="sell">sell</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-qty">Quantity</label>
+          <input id="f-qty" type="number" step="any" placeholder="0" required />
+        </div>
+        <div class="field">
+          <label for="f-price">Price</label>
+          <input id="f-price" type="number" step="any" placeholder="0" required />
+          <span class="kpi-foot">in the transaction's currency</span>
+        </div>
+        <div class="field">
+          <label for="f-currency">Currency</label>
+          <input id="f-currency" type="text" value="SEK" />
+        </div>
+        <div class="field">
+          <label for="f-fees">Fees SEK (optional)</label>
+          <input id="f-fees" type="number" step="any" placeholder="0" />
+        </div>
+        <div class="field field-wide">
+          <label for="f-note">Note (optional)</label>
+          <input id="f-note" type="text" placeholder="rebalance to target weight" />
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn">Record transaction</button>
+          <button type="button" class="btn btn-ghost" id="f-reset">Clear</button>
+          <span id="form-msg" class="form-msg"></span>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Transaction ledger</h2>
+        <div class="card-sub">GET /api/transactions · newest first · delete is for manual rows only</div>
+        <div class="card-actions">
+          <input id="filter-isin" type="text" placeholder="filter by ISIN…"
+                 style="background:var(--panel-2);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:7px 10px;font-size:13px" />
+          <button type="button" class="btn btn-ghost btn-sm" id="filter-clear">Clear</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table id="tx-table">
+          <thead>
+            <tr><th>Date</th><th>ISIN</th><th style="text-align:left">Name</th><th>Kind</th>
+                <th>Qty</th><th>Price</th><th>Ccy</th><th>Amount SEK</th><th>Fees SEK</th>
+                <th>Source</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span>AlphaOS · V2-FRONTIER · transactions (SEK)</span>
+      <span class="muted">Deleting an 'avanza' row will be re-created on the next CSV import.</span>
+    </footer>
+
+  </main>
+</body>
+</html>

@@ -29,7 +29,8 @@
 
   function holdingRow(h, code) {
     const pc = pnlCls(h.unrealized_pnl);
-    return `<tr>
+    const canExpand = !!h.isin;
+    return `<tr class="${canExpand ? "clickable" : ""}" data-row="${h.id}" ${canExpand ? `data-isin="${h.isin}"` : ""}>
       <td><b>${h.symbol || "—"}</b><div class="muted" style="font-size:11px">${h.name || ""}</div></td>
       <td>${h.isin || ""}</td>
       <td>${(h.asset_class || "").replace(/_/g, " ")}</td>
@@ -100,9 +101,65 @@
     }
 
     wrap.querySelectorAll("[data-edit]").forEach((b) =>
-      b.addEventListener("click", () => editHolding(parseInt(b.dataset.edit, 10))));
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        editHolding(parseInt(b.dataset.edit, 10));
+      }));
     wrap.querySelectorAll("[data-del]").forEach((b) =>
-      b.addEventListener("click", () => delHolding(parseInt(b.dataset.del, 10))));
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        delHolding(parseInt(b.dataset.del, 10));
+      }));
+    wrap.querySelectorAll("tr.clickable[data-isin]").forEach((tr) =>
+      tr.addEventListener("click", () => toggleHistory(tr)));
+  }
+
+  // --- Per-position transaction history (GET /api/history) ---
+
+  // Toggle an inline expand-row beneath a holding row, lazily loading its
+  // transaction ledger (the 10→12→8 running-quantity timeline).
+  async function toggleHistory(tr) {
+    const next = tr.nextElementSibling;
+    if (next && next.classList.contains("expand-row")) {
+      next.remove();
+      tr.classList.remove("expanded");
+      return;
+    }
+    const isin = tr.dataset.isin;
+    const cols = (tr.children || []).length || 14;
+    const exp = document.createElement("tr");
+    exp.className = "expand-row";
+    exp.innerHTML = `<td colspan="${cols}"><div class="expand-inner">
+      <div class="subcard-title">History · ${isin}</div>
+      <div class="muted">Loading history…</div></div></td>`;
+    tr.after(exp);
+    tr.classList.add("expanded");
+    try {
+      const res = await A.getJSON(`/api/history?isin=${encodeURIComponent(isin)}`);
+      exp.querySelector(".expand-inner").innerHTML =
+        `<div class="subcard-title">History · ${isin}</div>` + historyTable(res.history || []);
+    } catch (e) {
+      exp.querySelector(".expand-inner").innerHTML =
+        `<div class="subcard-title">History · ${isin}</div>` +
+        `<div class="form-msg err">${A.isDbError(e) ? "database not configured" : e.message}</div>`;
+    }
+  }
+
+  function historyTable(hist) {
+    if (!hist.length) return '<div class="muted">No transactions for this ISIN.</div>';
+    const rows = hist.map((t) => `<tr>
+      <td>${t.date || "—"}</td>
+      <td class="${t.kind === "sell" ? "neg" : "pos"}">${t.kind || ""}</td>
+      <td>${A.fmtNum(t.quantity, 2)}</td>
+      <td>${A.fmtNum(t.price, 2)}</td>
+      <td>${A.fmtNum(t.running_qty, 2)}</td>
+      <td>${t.source || ""}</td>
+      <td style="text-align:left">${t.note || ""}</td>
+    </tr>`).join("");
+    return `<div class="table-wrap"><table>
+      <thead><tr><th>Date</th><th>Kind</th><th>Qty</th><th>Price</th>
+        <th>Running qty</th><th>Source</th><th style="text-align:left">Note</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`;
   }
 
   // Look up a holding (and its sleeve code) across the allocation payload.
@@ -130,8 +187,6 @@
     $("f-name").value = h.name || "";
     $("f-asset").value = h.asset_class || "equity";
     $("f-currency").value = h.currency || "SEK";
-    $("f-qty").value = h.quantity != null ? h.quantity : "";
-    $("f-avgprice").value = h.avg_price != null ? h.avg_price : "";
     $("f-lastprice").value = h.last_price != null ? h.last_price : "";
     $("f-acquired").value = h.acquired_at || "";
     $("form-title").textContent = `Editing ${h.symbol || h.isin || h.id}`;
@@ -179,10 +234,7 @@
       name: $("f-name").value.trim() || undefined,
       asset_class: $("f-asset").value,
       currency: $("f-currency").value.trim() || "SEK",
-      quantity: num($("f-qty").value),
-      avg_price: num($("f-avgprice").value),
       last_price: num($("f-lastprice").value),
-      acquired_at: $("f-acquired").value || undefined,
     };
     if (idVal) body.id = parseInt(idVal, 10);
     try {
@@ -233,10 +285,10 @@
     previewEl().innerHTML =
       `<div class="subcard-title">Import preview (nothing saved yet)</div>` +
       `<div class="form-grid" style="margin-bottom:12px">
-         <div class="kpi"><div class="kpi-label">ROWS PARSED</div><div class="kpi-value">${s.rows ?? "—"}</div></div>
+         <div class="kpi"><div class="kpi-label">TRANSACTIONS</div><div class="kpi-value">${s.transactions ?? "—"}</div></div>
+         <div class="kpi"><div class="kpi-label">HOLDINGS</div><div class="kpi-value">${s.holdings_count ?? holdings.length}</div></div>
          <div class="kpi"><div class="kpi-label">DATE RANGE</div><div class="kpi-value" style="font-size:16px">${s.date_min || "—"} → ${s.date_max || "—"}</div></div>
          <div class="kpi"><div class="kpi-label">DEPOSITS TOTAL</div><div class="kpi-value" style="font-size:18px">${A.fmtSEK(s.deposits_total)}</div></div>
-         <div class="kpi"><div class="kpi-label">HOLDINGS</div><div class="kpi-value">${s.holdings_count ?? holdings.length}</div></div>
        </div>` +
       (holdings.length
         ? `<div class="table-wrap"><table>
@@ -272,7 +324,7 @@
       const s = res.summary || {};
       msg.className = "form-msg ok";
       msg.textContent =
-        `imported ✓ — ${s.created ?? 0} created, ${s.updated ?? 0} updated ` +
+        `imported ✓ — ${s.transactions_imported ?? 0} transactions ` +
         `(${s.holdings_count ?? 0} holdings)`;
       PENDING_FILE = null;
       $("import-file").value = "";

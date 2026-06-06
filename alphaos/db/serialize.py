@@ -10,7 +10,7 @@ import enum
 from decimal import Decimal
 from typing import Any
 
-from .models import Holding, NavSnapshot, PortfolioConfig, Sleeve
+from .models import Holding, NavSnapshot, PortfolioConfig, Sleeve, Transaction
 
 
 def _f(v: Any) -> float | None:
@@ -82,6 +82,25 @@ def nav_snapshot_to_dict(n: NavSnapshot) -> dict[str, Any]:
         "belaningsgrad": _f(n.belaningsgrad),
         "delever_status": n.delever_status.value,
         "notes": n.notes,
+    }
+
+
+def transaction_to_dict(t: Transaction) -> dict[str, Any]:
+    return {
+        "id": t.id,
+        "date": t.date.isoformat() if t.date else None,
+        "isin": t.isin,
+        "symbol": t.symbol,
+        "name": t.name,
+        "currency": t.currency,
+        "kind": t.kind.value,
+        "quantity": _f(t.quantity),
+        "price": _f(t.price),
+        "amount_sek": _f(t.amount_sek),
+        "fees_sek": _f(t.fees_sek),
+        "fx_rate": _f(t.fx_rate),
+        "source": t.source.value,
+        "note": t.note,
     }
 
 

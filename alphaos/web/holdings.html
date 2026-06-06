@@ -19,6 +19,7 @@
       <a href="/" class="nav-link">Overview</a>
       <a href="/allocation.html" class="nav-link">Allocation</a>
       <a href="/holdings.html" class="nav-link active">Holdings</a>
+      <a href="/transactions.html" class="nav-link">Transactions</a>
       <a href="/nav.html" class="nav-link">NAV ledger</a>
       <a href="/config.html" class="nav-link">Settings</a>
     </nav>
@@ -34,10 +35,16 @@
     <section class="card">
       <div class="card-header">
         <h2 id="form-title">Add / update holding</h2>
-        <div class="card-sub">POST /api/holdings · prices in the holding's currency, value in SEK</div>
+        <div class="card-sub">POST /api/holdings · metadata only · prices in the holding's currency, value in SEK</div>
         <div class="card-actions">
           <span class="pill hidden" id="edit-pill"></span>
         </div>
+      </div>
+      <div class="notice" style="background:var(--panel-2);border-color:var(--border);margin-bottom:14px">
+        Quantity &amp; average price are <b>derived from the transaction ledger</b> — change them by
+        importing a CSV or recording a buy/sell on the
+        <a href="/transactions.html" style="color:var(--accent)">Transactions</a> page. This form only
+        edits metadata (sleeve, symbol, ISIN, name, asset class, currency, current price).
       </div>
       <form id="holding-form" class="form-grid" autocomplete="off">
         <input type="hidden" id="f-id" />
@@ -74,23 +81,14 @@
           <input id="f-currency" type="text" value="SEK" />
         </div>
         <div class="field">
-          <label for="f-qty">Quantity</label>
-          <input id="f-qty" type="number" step="any" placeholder="0" />
-        </div>
-        <div class="field">
-          <label for="f-avgprice">Avg price (purchase)</label>
-          <input id="f-avgprice" type="number" step="any" placeholder="0" />
-          <span class="kpi-foot">in the holding's currency</span>
-        </div>
-        <div class="field">
           <label for="f-lastprice">Last price (optional)</label>
           <input id="f-lastprice" type="number" step="any" placeholder="(manual current price)" />
           <span class="kpi-foot">leave blank to value at cost / use MinIO</span>
         </div>
         <div class="field">
-          <label for="f-acquired">Acquired (optional)</label>
-          <input id="f-acquired" type="date" />
-          <span class="kpi-foot">first-purchase date; auto-filled on CSV import</span>
+          <label for="f-acquired">Acquired (read-only)</label>
+          <input id="f-acquired" type="date" readonly />
+          <span class="kpi-foot">first-purchase date; derived from the ledger</span>
         </div>
         <div class="form-actions">
           <button type="submit" class="btn" id="f-submit">Save holding</button>

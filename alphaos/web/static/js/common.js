@@ -164,7 +164,7 @@ window.alphaos = {
       margin: { l: 50, r: 20, t: 16, b: 40 },
       xaxis: { gridcolor: "#1f2733", zerolinecolor: "#1f2733" },
       yaxis: { gridcolor: "#1f2733", zerolinecolor: "#1f2733" },
-      hoverlabel: { bgcolor: "#121821", bordercolor: "#1f2733" },
+      hoverlabel: { bgcolor: "#0d1117", bordercolor: "#30363d", font: { color: "#e6edf3", size: 13 } },
       legend: { orientation: "h", y: 1.08 },
     }, extra);
   },

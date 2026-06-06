@@ -38,11 +38,12 @@
 
   function renderChart(rows) {
     const codes = rows.map((r) => r.code);
+    const tmpl = "<b>%{x}</b><br>%{fullData.name}: %{y:.1f}%<extra></extra>";
     const traces = [
       { x: codes, y: rows.map((r) => r.target_weight * 100), type: "bar", name: "target %",
-        marker: { color: "#4dd0e1" } },
+        marker: { color: "#4dd0e1" }, hovertemplate: tmpl },
       { x: codes, y: rows.map((r) => r.current_weight * 100), type: "bar", name: "current %",
-        marker: { color: "#34d399" } },
+        marker: { color: "#34d399" }, hovertemplate: tmpl },
     ];
     Plotly.newPlot("alloc-chart", traces, A.plotlyLayout({
       barmode: "group",
