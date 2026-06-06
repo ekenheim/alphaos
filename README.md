@@ -42,7 +42,6 @@ hive-partitioned `bars/tf=*/date=*/part.parquet` layout.
 | `/accounts.html`      | 7-tile KPI strip (ACCOUNTS / BLOW-UPS / ATTEMPTS / TOTAL COST / PAYOUTS / TOTAL PAID OUT / NET PROFIT) + ROI / FINAL PHASE, monthly cashflow bar chart (payouts vs challenge fees), account list table |
 | `/ledger.html`        | **Live ledger** (Postgres-backed): open/closed positions with qty, avg entry, realized P&L; per-position execution history; forms to **record an execution** (open/add/trim/close) and to **rebalance** a basket in one batch |
 | `/archive.html`       | **Strategy & backtest archive**: strategy catalog (slug/name/status/params) and the persisted backtest runs per strategy (n_trades, win%, Sharpe, max DD, CAGR, total R, PLACEBO pass) |
-| `/inspiration.html`   | Reference screenshots from `/screenshots/` rendered as a gallery with lightbox — compare the source aesthetic to AlphaOS's own pages |
 
 ## Trading style implemented
 

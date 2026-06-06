@@ -25,5 +25,3 @@ dist/
 # Editor / IDE
 .vscode/
 .idea/
-
-# NOTE: alphaos/screenshots is package data (declared in pyproject) -> NOT excluded.

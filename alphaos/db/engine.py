@@ -23,8 +23,8 @@ from contextlib import contextmanager
 from typing import Iterator
 from urllib.parse import quote_plus
 
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 
@@ -96,6 +96,33 @@ def get_sessionmaker() -> sessionmaker[Session]:
     get_engine()
     assert _state.factory is not None
     return _state.factory
+
+
+def db_status() -> dict:
+    """Best-effort connectivity summary for /api/status. Never raises.
+
+    Reports whether a DB is configured and, if so, whether `SELECT 1` succeeds —
+    plus the host/database/driver (no credentials).
+    """
+    url = database_url()
+    if not url:
+        return {"configured": False, "reachable": None}
+    info: dict = {"configured": True, "reachable": None}
+    try:
+        u = make_url(url)
+        info["host"] = u.host
+        info["database"] = u.database
+        info["driver"] = u.drivername
+    except Exception:
+        pass
+    try:
+        with get_engine().connect() as conn:
+            conn.execute(text("SELECT 1"))
+        info["reachable"] = True
+    except Exception as e:
+        info["reachable"] = False
+        info["error"] = type(e).__name__
+    return info
 
 
 @contextmanager

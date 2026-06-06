@@ -121,6 +121,46 @@ def have_credentials() -> bool:
     return bool(os.getenv("MINIO_SECRET_ACCESS_KEY") or os.getenv("MINIO_PASSWORD"))
 
 
+def bucket() -> str:
+    return _BUCKET
+
+
+def endpoint() -> str:
+    return _URL
+
+
+def check_reachable(timeout: float = 2.0) -> bool | None:
+    """Best-effort HeadBucket against the configured bucket (for /api/status).
+
+    Returns None if no credentials are set, True/False otherwise. Uses short
+    timeouts and no retries so a status check never hangs.
+    """
+    if not have_credentials():
+        return None
+    try:
+        import boto3
+        from botocore.client import Config
+
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=_URL,
+            aws_access_key_id=os.getenv("MINIO_ACCESS_KEY_ID") or os.getenv("MINIO_USERNAME"),
+            aws_secret_access_key=os.getenv("MINIO_SECRET_ACCESS_KEY") or os.getenv("MINIO_PASSWORD"),
+            config=Config(
+                signature_version="s3v4",
+                connect_timeout=timeout,
+                read_timeout=timeout,
+                retries={"max_attempts": 1},
+                s3={"addressing_style": "path"},
+            ),
+            region_name="us-east-1",
+        )
+        s3.head_bucket(Bucket=_BUCKET)
+        return True
+    except Exception:
+        return False
+
+
 def _load_splits(s3) -> dict[str, list[tuple[pd.Timestamp, float]]]:
     global _splits_cache
     if _splits_cache is not None:

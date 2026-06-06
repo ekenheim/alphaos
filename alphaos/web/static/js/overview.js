@@ -18,6 +18,28 @@
     console.error(e);
   }
 
+  // Data-source + DB diagnostics chip (independent of the dashboard load).
+  renderStatus();
+  async function renderStatus() {
+    const el = document.querySelector("#ds-status");
+    if (!el) return;
+    try {
+      const s = await Z.getJSON("/api/status");
+      const ds = s.data_source || {};
+      const db = s.database || {};
+      const src = ds.active === "minio"
+        ? (ds.minio_reachable === false ? "MinIO ✗" : "MinIO")
+        : "yfinance";
+      const dbtxt = !db.configured ? "DB off" : (db.reachable ? "DB ✓" : "DB ✗");
+      el.textContent = `src: ${src} · ${dbtxt}`;
+      el.title = `data source: ${ds.active} (${ds.minio_endpoint || ""} / ${ds.minio_bucket || ""}) · `
+        + `db: ${db.configured ? (db.host || "configured") : "not configured"}`;
+      el.classList.toggle("pill-neg", ds.minio_reachable === false || db.reachable === false);
+    } catch (e) {
+      el.textContent = "status n/a";
+    }
+  }
+
   function renderHero(pf) {
     document.querySelector("#hero-net-profit").textContent = Z.fmtMoney(pf.net_profit);
     const start = pf.equity_ts.length ? pf.equity_ts[0].slice(0, 10) : "—";

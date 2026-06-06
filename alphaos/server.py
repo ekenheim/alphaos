@@ -1,10 +1,13 @@
 """FastAPI backend serving the AlphaOS dashboard.
 
 Endpoints:
-  GET /api/health          health probe
+  GET /api/health          health probe (lightweight; used by k8s probes)
+  GET /api/status          data-source + DB diagnostics (live checks)
   GET /api/portfolio       META-EA strategy summary (KPIs + equity + monthly heatmap)
   GET /api/propfirm        prop-firm portfolio summary (10 sim accounts)
   GET /api/strategies      per-instrument strategy comparison
+  GET /api/ledger/*        live positions + trade-event ledger
+  GET /api/archive/*       strategy + backtest archive
   GET /                    serves the static dashboard
 
 Run:  python -m alphaos.cli serve   (or:  uvicorn alphaos.server:app --port 8503)
@@ -12,6 +15,7 @@ Run:  python -m alphaos.cli serve   (or:  uvicorn alphaos.server:app --port 8503
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from threading import Lock
@@ -34,15 +38,16 @@ from .db.serialize import (
 
 _DB_UNCONFIGURED = JSONResponse(status_code=503, content={"error": "database not configured"})
 
+try:
+    from . import __version__ as APP_VERSION
+except Exception:  # pragma: no cover
+    APP_VERSION = "unknown"
+
 WEB_DIR = Path(__file__).resolve().parent / "web"
-# Screenshots live inside the package so alphaos is fully self-contained.
-SCREENSHOTS_DIR = Path(__file__).resolve().parent / "screenshots"
 
 app = FastAPI(title="AlphaOS — META-EA prop dashboard")
 
 app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
-if SCREENSHOTS_DIR.exists():
-    app.mount("/screenshots", StaticFiles(directory=SCREENSHOTS_DIR), name="screenshots")
 
 
 # --- Cached compute (recompute on a slow cadence so the UI is snappy) ---
@@ -88,18 +93,32 @@ def propfirm() -> JSONResponse:
     return JSONResponse(prop_portfolio_summary_json(accounts))
 
 
-@app.get("/api/inspiration")
-def inspiration() -> JSONResponse:
-    """List screenshot files so the gallery can render them."""
-    if not SCREENSHOTS_DIR.exists():
-        return JSONResponse({"images": []})
-    exts = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
-    files = sorted([
-        f"/screenshots/{p.name}"
-        for p in SCREENSHOTS_DIR.iterdir()
-        if p.is_file() and p.suffix.lower() in exts
-    ])
-    return JSONResponse({"images": files})
+@app.get("/api/status")
+def status() -> JSONResponse:
+    """Diagnostics: which market-data source is active + DB connectivity.
+
+    Heavier than /api/health (does live reachability checks) — NOT used by the
+    k8s liveness/readiness probes, which hit /api/health.
+    """
+    from . import minio as zmin
+    from .db import engine as dbengine
+
+    minio_enabled = os.getenv("ALPHAOS_USE_MINIO") == "1"
+    minio_creds = zmin.have_credentials()
+    data_source = {
+        "active": "minio" if (minio_enabled and minio_creds) else "yfinance",
+        "minio_enabled": minio_enabled,
+        "minio_credentials": minio_creds,
+        "minio_endpoint": zmin.endpoint(),
+        "minio_bucket": zmin.bucket(),
+        "minio_reachable": zmin.check_reachable() if minio_enabled else None,
+    }
+    return JSONResponse({
+        "ok": True,
+        "version": APP_VERSION,
+        "data_source": data_source,
+        "database": dbengine.db_status(),
+    })
 
 
 # --- Ledger (live positions + trade-event ledger) ---
