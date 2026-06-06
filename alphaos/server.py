@@ -162,6 +162,7 @@ async def post_holding(request: Request) -> JSONResponse:
                 last_price=body.get("last_price"),
                 last_price_date=body.get("last_price_date"),
                 price_source=body.get("price_source"),
+                acquired_at=body.get("acquired_at"),
                 as_of=body.get("as_of"),
                 notes=body.get("notes"),
             )

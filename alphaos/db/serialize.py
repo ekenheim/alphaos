@@ -60,6 +60,7 @@ def holding_to_dict(h: Holding) -> dict[str, Any]:
         "last_price": _f(h.last_price),
         "last_price_date": h.last_price_date.isoformat() if h.last_price_date else None,
         "price_source": h.price_source.value if h.price_source else None,
+        "acquired_at": h.acquired_at.isoformat() if h.acquired_at else None,
         "as_of": h.as_of.isoformat() if h.as_of else None,
         "notes": h.notes,
     }

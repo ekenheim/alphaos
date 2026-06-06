@@ -164,6 +164,8 @@ class Holding(Base):
     avg_price: Mapped[float] = mapped_column(PRICE, default=0)
     # Exact SEK cost paid (from the Avanza CSV Belopp); None when not known.
     cost_basis_sek: Mapped[float | None] = mapped_column(MONEY, default=None)
+    # Date the position was first opened (earliest buy); for holding-period return.
+    acquired_at: Mapped[dt.date | None] = mapped_column(Date, default=None)
     # Latest price per unit (instrument currency): MinIO close or a manual entry.
     last_price: Mapped[float | None] = mapped_column(PRICE, default=None)
     last_price_date: Mapped[dt.date | None] = mapped_column(Date, default=None)

@@ -153,6 +153,7 @@ def upsert_holding(
     last_price: Any = None,
     last_price_date: dt.date | str | None = None,
     price_source: PriceSource | str | None = None,
+    acquired_at: dt.date | str | None = None,
     as_of: dt.date | str | None = None,
     notes: str | None = None,
 ) -> Holding:
@@ -199,6 +200,10 @@ def upsert_holding(
         last_price_date = dt.date.fromisoformat(last_price_date) if last_price_date else None
     if last_price_date is not None:
         holding.last_price_date = last_price_date
+    if isinstance(acquired_at, str):
+        acquired_at = dt.date.fromisoformat(acquired_at) if acquired_at else None
+    if acquired_at is not None:
+        holding.acquired_at = acquired_at
     if isinstance(as_of, str):
         as_of = dt.date.fromisoformat(as_of) if as_of else None
     if as_of is not None:
@@ -284,6 +289,7 @@ def allocation(session: Session) -> dict[str, Any]:
             "last_price": float(_dec(h.last_price)) if h.last_price is not None else None,
             "last_price_date": h.last_price_date.isoformat() if h.last_price_date else None,
             "price_source": v["price_source"],
+            "acquired_at": h.acquired_at.isoformat() if h.acquired_at else None,
             "market_value": float(v["market_value"]),
             "cost_basis": float(v["cost_basis"]),
             "unrealized_pnl": float(v["unrealized_pnl"]),

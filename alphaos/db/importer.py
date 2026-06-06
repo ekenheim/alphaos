@@ -86,11 +86,14 @@ def parse_avanza_csv(content: bytes | str) -> dict[str, Any]:
         h = acc.setdefault(isin, {
             "isin": isin, "name": name, "currency": ccy,
             "qty": Decimal("0"), "cost_ccy": Decimal("0"), "cost_sek": Decimal("0"),
+            "first_buy": None,
         })
         if name and not h["name"]:
             h["name"] = name
 
         if antal > 0:  # buy: add to position + cost basis
+            if when and (h["first_buy"] is None or when < h["first_buy"]):
+                h["first_buy"] = when
             h["qty"] += antal
             h["cost_ccy"] += antal * kurs
             h["cost_sek"] += abs(belopp) if belopp is not None else (antal * kurs)
@@ -118,6 +121,7 @@ def parse_avanza_csv(content: bytes | str) -> dict[str, Any]:
             "quantity": qty,
             "avg_price": (h["cost_ccy"] / qty),
             "cost_basis_sek": h["cost_sek"],
+            "acquired_at": h["first_buy"],
         })
 
     return {
@@ -148,6 +152,7 @@ def import_transactions(session: Session, content: bytes | str) -> dict[str, Any
             quantity=hd["quantity"],
             avg_price=hd["avg_price"],
             cost_basis_sek=hd["cost_basis_sek"],
+            acquired_at=hd.get("acquired_at"),
         )
         if existing:
             updated += 1

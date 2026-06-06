@@ -42,6 +42,7 @@
       <td>${A.fmtSEK(h.market_value)}</td>
       <td class="${pc}">${A.fmtSEKSigned(h.unrealized_pnl)}</td>
       <td>${A.fmtPct(h.weight, 1)}</td>
+      <td>${h.acquired_at || "—"}</td>
       <td>
         <button class="btn btn-ghost btn-sm" data-edit="${h.id}">edit</button>
         <button class="leg-x" data-del="${h.id}" title="delete">×</button>
@@ -61,7 +62,7 @@
           <th>Symbol</th><th>ISIN</th><th>Class</th><th>Ccy</th>
           <th>Qty</th><th>Avg price</th><th>Last price</th><th>Source</th>
           <th>Cost (SEK)</th><th>Market value (SEK)</th><th>Unrealized P/L (SEK)</th>
-          <th>Weight</th><th></th>
+          <th>Weight</th><th>Acquired</th><th></th>
         </tr></thead>
         <tbody>${rows}</tbody></table></div>`;
     return card;
@@ -132,6 +133,7 @@
     $("f-qty").value = h.quantity != null ? h.quantity : "";
     $("f-avgprice").value = h.avg_price != null ? h.avg_price : "";
     $("f-lastprice").value = h.last_price != null ? h.last_price : "";
+    $("f-acquired").value = h.acquired_at || "";
     $("form-title").textContent = `Editing ${h.symbol || h.isin || h.id}`;
     const pill = $("edit-pill");
     pill.textContent = `id ${h.id}`;
@@ -180,6 +182,7 @@
       quantity: num($("f-qty").value),
       avg_price: num($("f-avgprice").value),
       last_price: num($("f-lastprice").value),
+      acquired_at: $("f-acquired").value || undefined,
     };
     if (idVal) body.id = parseInt(idVal, 10);
     try {
