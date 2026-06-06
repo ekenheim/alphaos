@@ -33,6 +33,23 @@ window.alphaos = {
     return data;
   },
 
+  // POST a single file as multipart/form-data, parse JSON response. Throws Error
+  // with .status/.data on !ok (e.g. 400 parse/ValueError or 503 no database).
+  async uploadFile(path, file, fieldName = "file") {
+    const fd = new FormData();
+    fd.append(fieldName, file, file.name);
+    const r = await fetch(path, { method: "POST", body: fd });
+    let data = {};
+    try { data = await r.json(); } catch (e) { /* non-JSON body */ }
+    if (!r.ok) {
+      const err = new Error(data.error || `${path}: HTTP ${r.status}`);
+      err.status = r.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
+  },
+
   // DELETE request, parse JSON response. Throws Error with .status/.data on !ok
   // (e.g. 503 database not configured, 404 not found).
   async deleteJSON(path) {

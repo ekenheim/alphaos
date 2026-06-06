@@ -55,7 +55,11 @@ def holding_to_dict(h: Holding) -> dict[str, Any]:
         "asset_class": h.asset_class.value,
         "currency": h.currency,
         "quantity": _f(h.quantity),
-        "market_value": _f(h.market_value),
+        "avg_price": _f(h.avg_price),
+        "cost_basis_sek": _f(h.cost_basis_sek),
+        "last_price": _f(h.last_price),
+        "last_price_date": h.last_price_date.isoformat() if h.last_price_date else None,
+        "price_source": h.price_source.value if h.price_source else None,
         "as_of": h.as_of.isoformat() if h.as_of else None,
         "notes": h.notes,
     }
@@ -98,5 +102,9 @@ def config_to_dict(c: PortfolioConfig) -> dict[str, Any]:
         "external_reserve": _f(c.external_reserve),
         "planning_cagr_low": _f(c.planning_cagr_low),
         "planning_cagr_high": _f(c.planning_cagr_high),
+        "fx_usd_sek": _f(c.fx_usd_sek),
+        "fx_eur_sek": _f(c.fx_eur_sek),
+        "fx_as_of": c.fx_as_of.isoformat() if c.fx_as_of else None,
+        "fx_source": c.fx_source,
         "notes": c.notes,
     }

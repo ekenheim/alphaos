@@ -1,15 +1,14 @@
-// Holdings page — grouped by sleeve, add/update/delete.
+// Holdings page — valued view grouped by sleeve (GET /api/allocation),
+// add/update/delete, Avanza CSV import (preview → apply), MinIO price refresh.
 (function () {
   const A = window.alphaos;
   const $ = (id) => document.getElementById(id);
 
-  let SLEEVES = [];
-  let HOLDINGS = [];
+  let SLEEVES = [];        // from /api/sleeves (for the form select)
+  let ALLOC = null;        // from /api/allocation (valued table)
+  let PENDING_FILE = null;  // staged CSV awaiting "Apply import"
 
-  function sleeveLabel(id) {
-    const s = SLEEVES.find((x) => x.id === id);
-    return s ? `${s.code} — ${s.name || ""}` : "Unassigned";
-  }
+  // --- Form select ---
 
   function fillSleeveSelect() {
     const sel = $("f-sleeve");
@@ -22,57 +21,82 @@
     });
   }
 
-  function render() {
-    const total = HOLDINGS.reduce((a, h) => a + (h.market_value || 0), 0);
-    $("h-total").textContent = "Total " + A.fmtSEK(total);
+  // --- Valued table (from /api/allocation) ---
 
-    // group by sleeve_id, preserving sleeve sort order, unassigned last
-    const groups = new Map();
-    SLEEVES.forEach((s) => groups.set(s.id, []));
-    groups.set(null, []);
-    HOLDINGS.forEach((h) => {
-      const key = groups.has(h.sleeve_id) ? h.sleeve_id : null;
-      groups.get(key).push(h);
-    });
+  function pnlCls(v) {
+    return v > 1e-9 ? "pos" : (v < -1e-9 ? "neg" : "");
+  }
+
+  function holdingRow(h, code) {
+    const pc = pnlCls(h.unrealized_pnl);
+    return `<tr>
+      <td><b>${h.symbol || "—"}</b><div class="muted" style="font-size:11px">${h.name || ""}</div></td>
+      <td>${h.isin || ""}</td>
+      <td>${(h.asset_class || "").replace(/_/g, " ")}</td>
+      <td>${h.currency || ""}</td>
+      <td>${A.fmtNum(h.quantity, 2)}</td>
+      <td>${A.fmtNum(h.avg_price, 2)}</td>
+      <td>${h.last_price != null ? A.fmtNum(h.last_price, 2) : "—"}</td>
+      <td>${h.price_source || "—"}</td>
+      <td>${A.fmtSEK(h.cost_basis)}</td>
+      <td>${A.fmtSEK(h.market_value)}</td>
+      <td class="${pc}">${A.fmtSEKSigned(h.unrealized_pnl)}</td>
+      <td>${A.fmtPct(h.weight, 1)}</td>
+      <td>
+        <button class="btn btn-ghost btn-sm" data-edit="${h.id}">edit</button>
+        <button class="leg-x" data-del="${h.id}" title="delete">×</button>
+      </td>
+    </tr>`;
+  }
+
+  function groupCard(title, members, subVal, subWeight, code) {
+    const card = document.createElement("div");
+    card.className = "subcard";
+    card.style.marginBottom = "14px";
+    const rows = members.map((h) => holdingRow(h, code)).join("");
+    card.innerHTML =
+      `<div class="subcard-title">${title} · ${A.fmtSEK(subVal)} · ${A.fmtPct(subWeight, 1)}</div>` +
+      `<div class="table-wrap"><table>
+        <thead><tr>
+          <th>Symbol</th><th>ISIN</th><th>Class</th><th>Ccy</th>
+          <th>Qty</th><th>Avg price</th><th>Last price</th><th>Source</th>
+          <th>Cost (SEK)</th><th>Market value (SEK)</th><th>Unrealized P/L (SEK)</th>
+          <th>Weight</th><th></th>
+        </tr></thead>
+        <tbody>${rows}</tbody></table></div>`;
+    return card;
+  }
+
+  function render() {
+    if (!ALLOC) return;
+    $("h-total").textContent = "Total " + A.fmtSEK(ALLOC.total_gross_value);
 
     const wrap = $("holdings-groups");
     wrap.innerHTML = "";
-    if (!HOLDINGS.length) {
-      wrap.innerHTML = '<div class="muted" style="padding:8px">No holdings yet — add one above.</div>';
+
+    const sleeves = ALLOC.sleeves || [];
+    const unassigned = ALLOC.unassigned || { holdings: [] };
+    const anyHoldings =
+      sleeves.some((s) => (s.holdings || []).length) || (unassigned.holdings || []).length;
+
+    if (!anyHoldings) {
+      wrap.innerHTML = '<div class="muted" style="padding:8px">No holdings yet — add one above, or import a CSV.</div>';
       return;
     }
-    groups.forEach((members, id) => {
+
+    sleeves.forEach((s) => {
+      const members = s.holdings || [];
       if (!members.length) return;
-      const subtotal = members.reduce((a, h) => a + (h.market_value || 0), 0);
-      const card = document.createElement("div");
-      card.className = "subcard";
-      card.style.marginBottom = "14px";
-      const rows = members.map((h) => {
-        const w = total > 0 ? h.market_value / total : 0;
-        return `<tr>
-          <td><b>${h.symbol}</b></td>
-          <td>${h.name || ""}</td>
-          <td>${h.isin || ""}</td>
-          <td>${(h.asset_class || "").replace(/_/g, " ")}</td>
-          <td>${h.currency || ""}</td>
-          <td>${A.fmtNum(h.quantity, 2)}</td>
-          <td>${A.fmtSEK(h.market_value)}</td>
-          <td>${A.fmtPct(w, 1)}</td>
-          <td>${h.as_of || ""}</td>
-          <td>
-            <button class="btn btn-ghost btn-sm" data-edit="${h.id}">edit</button>
-            <button class="leg-x" data-del="${h.id}" title="delete">×</button>
-          </td>
-        </tr>`;
-      }).join("");
-      card.innerHTML =
-        `<div class="subcard-title">${sleeveLabel(id)} · ${A.fmtSEK(subtotal)} · ${A.fmtPct(total > 0 ? subtotal / total : 0, 1)}</div>` +
-        `<div class="table-wrap"><table>
-          <thead><tr><th>Symbol</th><th>Name</th><th>ISIN</th><th>Class</th><th>Ccy</th>
-            <th>Qty</th><th>Market value</th><th>Weight</th><th>As of</th><th></th></tr></thead>
-          <tbody>${rows}</tbody></table></div>`;
-      wrap.appendChild(card);
+      const title = `${s.code} — ${s.name || ""}`;
+      wrap.appendChild(groupCard(title, members, s.current_value, s.current_weight, s.code));
     });
+
+    if ((unassigned.holdings || []).length) {
+      wrap.appendChild(groupCard(
+        "Unassigned", unassigned.holdings,
+        unassigned.current_value, unassigned.current_weight, "",
+      ));
+    }
 
     wrap.querySelectorAll("[data-edit]").forEach((b) =>
       b.addEventListener("click", () => editHolding(parseInt(b.dataset.edit, 10))));
@@ -80,21 +104,35 @@
       b.addEventListener("click", () => delHolding(parseInt(b.dataset.del, 10))));
   }
 
+  // Look up a holding (and its sleeve code) across the allocation payload.
+  function findHolding(id) {
+    if (!ALLOC) return null;
+    for (const s of (ALLOC.sleeves || [])) {
+      const h = (s.holdings || []).find((x) => x.id === id);
+      if (h) return { h, code: s.code };
+    }
+    const u = ((ALLOC.unassigned || {}).holdings || []).find((x) => x.id === id);
+    if (u) return { h: u, code: "" };
+    return null;
+  }
+
+  // --- Form ---
+
   function editHolding(id) {
-    const h = HOLDINGS.find((x) => x.id === id);
-    if (!h) return;
+    const found = findHolding(id);
+    if (!found) return;
+    const h = found.h;
     $("f-id").value = h.id;
-    $("f-sleeve").value = h.sleeve_code || (SLEEVES.find((s) => s.id === h.sleeve_id) || {}).code || "";
+    $("f-sleeve").value = found.code || "";
     $("f-symbol").value = h.symbol || "";
     $("f-isin").value = h.isin || "";
     $("f-name").value = h.name || "";
     $("f-asset").value = h.asset_class || "equity";
     $("f-currency").value = h.currency || "SEK";
     $("f-qty").value = h.quantity != null ? h.quantity : "";
-    $("f-mv").value = h.market_value != null ? h.market_value : "";
-    $("f-asof").value = h.as_of || "";
-    $("f-notes").value = h.notes || "";
-    $("form-title").textContent = `Editing ${h.symbol}`;
+    $("f-avgprice").value = h.avg_price != null ? h.avg_price : "";
+    $("f-lastprice").value = h.last_price != null ? h.last_price : "";
+    $("form-title").textContent = `Editing ${h.symbol || h.isin || h.id}`;
     const pill = $("edit-pill");
     pill.textContent = `id ${h.id}`;
     pill.classList.remove("hidden");
@@ -114,8 +152,9 @@
   }
 
   async function delHolding(id) {
-    const h = HOLDINGS.find((x) => x.id === id);
-    if (!confirm(`Delete holding ${h ? h.symbol : id}?`)) return;
+    const found = findHolding(id);
+    const label = found ? (found.h.symbol || found.h.isin || id) : id;
+    if (!confirm(`Delete holding ${label}?`)) return;
     try {
       await A.deleteJSON(`/api/holdings/${id}`);
       await load();
@@ -139,9 +178,8 @@
       asset_class: $("f-asset").value,
       currency: $("f-currency").value.trim() || "SEK",
       quantity: num($("f-qty").value),
-      market_value: num($("f-mv").value),
-      as_of: $("f-asof").value || undefined,
-      notes: $("f-notes").value.trim() || undefined,
+      avg_price: num($("f-avgprice").value),
+      last_price: num($("f-lastprice").value),
     };
     if (idVal) body.id = parseInt(idVal, 10);
     try {
@@ -156,15 +194,136 @@
     }
   }
 
+  // --- CSV import (preview → apply) ---
+
+  function previewEl() { return $("import-preview"); }
+
+  async function onFilePicked(ev) {
+    const file = ev.target.files && ev.target.files[0];
+    PENDING_FILE = file || null;
+    const box = previewEl();
+    if (!file) { box.classList.add("hidden"); box.innerHTML = ""; return; }
+    box.classList.remove("hidden");
+    box.innerHTML = '<div class="muted">Parsing preview…</div>';
+    try {
+      const res = await A.uploadFile(
+        "/api/import/transactions?preview=true", file, "file");
+      renderPreview(res);
+    } catch (e) {
+      box.innerHTML = "";
+      A.showNotice($("notice"), e);
+    }
+  }
+
+  function renderPreview(res) {
+    const s = res.summary || {};
+    const holdings = res.holdings || [];
+    const rows = holdings.map((h) => `<tr>
+      <td><b>${h.isin || ""}</b></td>
+      <td style="text-align:left">${h.name || ""}</td>
+      <td>${h.currency || ""}</td>
+      <td>${A.fmtNum(h.quantity, 2)}</td>
+      <td>${A.fmtNum(h.avg_price, 2)}</td>
+      <td>${A.fmtSEK(h.cost_basis_sek)}</td>
+    </tr>`).join("");
+
+    previewEl().innerHTML =
+      `<div class="subcard-title">Import preview (nothing saved yet)</div>` +
+      `<div class="form-grid" style="margin-bottom:12px">
+         <div class="kpi"><div class="kpi-label">ROWS PARSED</div><div class="kpi-value">${s.rows ?? "—"}</div></div>
+         <div class="kpi"><div class="kpi-label">DATE RANGE</div><div class="kpi-value" style="font-size:16px">${s.date_min || "—"} → ${s.date_max || "—"}</div></div>
+         <div class="kpi"><div class="kpi-label">DEPOSITS TOTAL</div><div class="kpi-value" style="font-size:18px">${A.fmtSEK(s.deposits_total)}</div></div>
+         <div class="kpi"><div class="kpi-label">HOLDINGS</div><div class="kpi-value">${s.holdings_count ?? holdings.length}</div></div>
+       </div>` +
+      (holdings.length
+        ? `<div class="table-wrap"><table>
+             <thead><tr><th>ISIN</th><th style="text-align:left">Name</th><th>Ccy</th>
+               <th>Qty</th><th>Avg price</th><th>Cost basis (SEK)</th></tr></thead>
+             <tbody>${rows}</tbody></table></div>`
+        : `<div class="muted">No open holdings detected in this export.</div>`) +
+      `<div class="form-actions">
+         <button type="button" class="btn" id="import-apply">Apply import</button>
+         <button type="button" class="btn btn-ghost" id="import-cancel">Cancel</button>
+         <span id="import-msg" class="form-msg"></span>
+         <span class="muted">Matched on ISIN — re-importing the same export is safe (idempotent); existing sleeve &amp; symbol are kept.</span>
+       </div>`;
+
+    $("import-apply").addEventListener("click", applyImport);
+    $("import-cancel").addEventListener("click", () => {
+      PENDING_FILE = null;
+      $("import-file").value = "";
+      previewEl().classList.add("hidden");
+      previewEl().innerHTML = "";
+    });
+  }
+
+  async function applyImport() {
+    if (!PENDING_FILE) return;
+    const msg = $("import-msg");
+    const btn = $("import-apply");
+    msg.className = "form-msg";
+    msg.textContent = "importing…";
+    btn.disabled = true;
+    try {
+      const res = await A.uploadFile("/api/import/transactions", PENDING_FILE, "file");
+      const s = res.summary || {};
+      msg.className = "form-msg ok";
+      msg.textContent =
+        `imported ✓ — ${s.created ?? 0} created, ${s.updated ?? 0} updated ` +
+        `(${s.holdings_count ?? 0} holdings)`;
+      PENDING_FILE = null;
+      $("import-file").value = "";
+      await load();
+    } catch (e) {
+      msg.className = "form-msg err";
+      msg.textContent = e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // --- MinIO price refresh ---
+
+  async function refreshPrices() {
+    const msg = $("prices-msg");
+    const btn = $("prices-refresh");
+    msg.className = "form-msg";
+    msg.textContent = "refreshing prices…";
+    btn.disabled = true;
+    try {
+      const res = await A.postJSON("/api/prices/refresh", {});
+      const p = res.prices || {};
+      if (p.ok) {
+        const skipped = Array.isArray(p.skipped) ? p.skipped.length : 0;
+        msg.className = "form-msg ok";
+        msg.textContent =
+          `prices ✓ — ${p.updated ?? 0} updated, ${skipped} skipped` +
+          (p.as_of ? ` · as of ${p.as_of}` : "") +
+          (p.bucket ? ` · ${p.bucket}` : "");
+        await load();
+      } else {
+        msg.className = "form-msg err";
+        msg.textContent = p.error || "price refresh unavailable";
+      }
+    } catch (e) {
+      msg.className = "form-msg err";
+      msg.textContent = A.isDbError(e) ? "database not configured" : e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  // --- Load ---
+
   async function load() {
     A.dbChip($("db-chip"));
     try {
-      const [sl, hl] = await Promise.all([
+      const [sl, al] = await Promise.all([
         A.getJSON("/api/sleeves"),
-        A.getJSON("/api/holdings"),
+        A.getJSON("/api/allocation"),
       ]);
       SLEEVES = sl.sleeves || [];
-      HOLDINGS = hl.holdings || [];
+      ALLOC = al;
       fillSleeveSelect();
       render();
     } catch (e) {
@@ -176,5 +335,7 @@
     load();
     $("holding-form").addEventListener("submit", onSubmit);
     $("f-reset").addEventListener("click", resetForm);
+    $("import-file").addEventListener("change", onFilePicked);
+    $("prices-refresh").addEventListener("click", refreshPrices);
   });
 })();

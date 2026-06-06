@@ -10,3 +10,7 @@ dist/
 .venv/
 .vscode/
 .idea/
+
+# Personal data exports (Avanza transactions, holdings) — NEVER commit
+*.csv
+transaktioner_*.csv

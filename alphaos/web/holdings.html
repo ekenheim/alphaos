@@ -34,7 +34,7 @@
     <section class="card">
       <div class="card-header">
         <h2 id="form-title">Add / update holding</h2>
-        <div class="card-sub">POST /api/holdings · market value in SEK</div>
+        <div class="card-sub">POST /api/holdings · prices in the holding's currency, value in SEK</div>
         <div class="card-actions">
           <span class="pill hidden" id="edit-pill"></span>
         </div>
@@ -46,8 +46,9 @@
           <select id="f-sleeve"></select>
         </div>
         <div class="field">
-          <label for="f-symbol">Symbol</label>
-          <input id="f-symbol" type="text" placeholder="CNDX" required />
+          <label for="f-symbol">Symbol (US ticker)</label>
+          <input id="f-symbol" type="text" placeholder="NVDA" required />
+          <span class="kpi-foot">US ticker for MinIO pricing</span>
         </div>
         <div class="field">
           <label for="f-isin">ISIN</label>
@@ -77,16 +78,14 @@
           <input id="f-qty" type="number" step="any" placeholder="0" />
         </div>
         <div class="field">
-          <label for="f-mv">Market value (SEK)</label>
-          <input id="f-mv" type="number" step="any" placeholder="0" />
+          <label for="f-avgprice">Avg price (purchase)</label>
+          <input id="f-avgprice" type="number" step="any" placeholder="0" />
+          <span class="kpi-foot">in the holding's currency</span>
         </div>
         <div class="field">
-          <label for="f-asof">As of</label>
-          <input id="f-asof" type="date" />
-        </div>
-        <div class="field field-wide">
-          <label for="f-notes">Notes</label>
-          <textarea id="f-notes"></textarea>
+          <label for="f-lastprice">Last price (optional)</label>
+          <input id="f-lastprice" type="number" step="any" placeholder="(manual current price)" />
+          <span class="kpi-foot">leave blank to value at cost / use MinIO</span>
         </div>
         <div class="form-actions">
           <button type="submit" class="btn" id="f-submit">Save holding</button>
@@ -98,8 +97,30 @@
 
     <section class="card">
       <div class="card-header">
+        <h2>Data tools</h2>
+        <div class="card-sub">Import Avanza transactions (CSV) · refresh US prices from MinIO</div>
+        <div class="card-actions">
+          <button type="button" class="btn btn-ghost" id="prices-refresh">Refresh US prices (MinIO)</button>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="field field-wide">
+          <label for="import-file">Import transactions (CSV)</label>
+          <input id="import-file" type="file" accept=".csv,text/csv" />
+          <span class="kpi-foot">Avanza “transaktioner” export. Holdings match on ISIN, so re-importing the same export is safe (idempotent).</span>
+        </div>
+      </div>
+
+      <div id="prices-msg" class="form-msg" style="margin-top:8px"></div>
+
+      <div id="import-preview" class="subcard hidden" style="margin-top:14px"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
         <h2>Holdings by sleeve</h2>
-        <div class="card-sub">Weight is market value / total gross</div>
+        <div class="card-sub">Weight is market value / total gross · GET /api/allocation</div>
         <div class="card-actions"><span class="pill" id="h-total">Total —</span></div>
       </div>
       <div id="holdings-groups"></div>

@@ -14,6 +14,9 @@ Endpoints:
   GET  /api/nav            NAV snapshots + current risk
   POST /api/nav            add a NAV snapshot
   GET  /api/risk           current risk
+  POST /api/import/transactions  import Avanza CSV (?preview=true to parse only)
+  POST /api/fx/refresh     refresh FX rates (Riksbank/ECB)
+  POST /api/prices/refresh refresh prices from MinIO
   GET  /                   serves the static dashboard
 
 Run:  python -m alphaos.cli serve   (or:  uvicorn alphaos.server:app --port 8503)
@@ -23,7 +26,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -31,6 +34,7 @@ from .db import session_scope, have_database, db_status
 from .db import config as dbconfig
 from .db import allocation as dballoc
 from .db import nav as dbnav
+from .db import fx as dbfx, pricing as dbpricing, importer as dbimporter
 from .db.serialize import (
     jsonable, sleeve_to_dict, holding_to_dict, nav_snapshot_to_dict,
     config_to_dict,
@@ -147,13 +151,17 @@ async def post_holding(request: Request) -> JSONResponse:
                 id=body.get("id"),
                 sleeve_code=body.get("sleeve_code"),
                 sleeve_id=body.get("sleeve_id"),
-                symbol=body["symbol"],
+                symbol=body.get("symbol"),
                 isin=body.get("isin"),
                 name=body.get("name"),
                 asset_class=body.get("asset_class"),
-                currency=body.get("currency", "SEK"),
-                quantity=body.get("quantity", 0),
-                market_value=body.get("market_value", 0),
+                currency=body.get("currency"),
+                quantity=body.get("quantity"),
+                avg_price=body.get("avg_price"),
+                cost_basis_sek=body.get("cost_basis_sek"),
+                last_price=body.get("last_price"),
+                last_price_date=body.get("last_price_date"),
+                price_source=body.get("price_source"),
                 as_of=body.get("as_of"),
                 notes=body.get("notes"),
             )
@@ -224,6 +232,53 @@ def get_risk() -> JSONResponse:
         return _DB_UNCONFIGURED
     with session_scope() as session:
         return JSONResponse({"risk": jsonable(dbnav.current_risk(session))})
+
+
+# --- Import / FX / prices ---
+
+@app.post("/api/import/transactions")
+async def import_tx(file: UploadFile = File(...), preview: bool = False) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    content = await file.read()
+    try:
+        if preview:
+            parsed = dbimporter.parse_avanza_csv(content)
+            holdings = parsed.get("holdings", [])
+            summary = {
+                "deposits_total": parsed.get("deposits_total"),
+                "date_min": parsed.get("date_min"),
+                "date_max": parsed.get("date_max"),
+                "rows": parsed.get("rows"),
+                "holdings_count": len(holdings),
+            }
+            return JSONResponse(jsonable({
+                "preview": True,
+                "summary": summary,
+                "holdings": holdings,
+            }))
+        with session_scope() as session:
+            result = dbimporter.import_transactions(session, content)
+            payload = jsonable({"summary": result})
+        return JSONResponse(payload)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.post("/api/fx/refresh")
+def post_fx_refresh() -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        return JSONResponse(jsonable({"fx": dbfx.refresh_fx(session)}))
+
+
+@app.post("/api/prices/refresh")
+def post_prices_refresh() -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        return JSONResponse(jsonable({"prices": dbpricing.refresh_prices(session)}))
 
 
 # --- Static dashboard ---

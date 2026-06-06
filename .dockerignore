@@ -11,6 +11,9 @@ alphaos/data_cache/
 .env
 .env.local
 
+# Personal data exports (Avanza transactions) — never bake into the image
+*.csv
+
 # Build artifacts
 *.egg-info/
 build/

@@ -45,11 +45,78 @@
     });
   }
 
+  // --- FX section ---
+
+  function fillFx(cfg) {
+    $("fx-usd").value = cfg.fx_usd_sek == null ? "" : cfg.fx_usd_sek;
+    $("fx-eur").value = cfg.fx_eur_sek == null ? "" : cfg.fx_eur_sek;
+    $("fx-asof").value = cfg.fx_as_of || "—";
+    $("fx-source").value = cfg.fx_source || "—";
+    $("fx-asof-pill").textContent = "as of " + (cfg.fx_as_of || "—");
+  }
+
+  // Apply the {usd_sek, eur_sek, as_of, source} shape returned by /api/fx/refresh.
+  function fillFxFromRefresh(fx) {
+    $("fx-usd").value = fx.usd_sek == null ? "" : fx.usd_sek;
+    $("fx-eur").value = fx.eur_sek == null ? "" : fx.eur_sek;
+    $("fx-asof").value = fx.as_of || "—";
+    $("fx-source").value = fx.source || "—";
+    $("fx-asof-pill").textContent = "as of " + (fx.as_of || "—");
+  }
+
+  async function onFxSubmit(ev) {
+    ev.preventDefault();
+    const msg = $("fx-msg");
+    msg.className = "form-msg";
+    msg.textContent = "saving…";
+    const body = {};
+    const usd = $("fx-usd").value;
+    const eur = $("fx-eur").value;
+    if (usd !== "") body.fx_usd_sek = parseFloat(usd);
+    if (eur !== "") body.fx_eur_sek = parseFloat(eur);
+    try {
+      const data = await A.postJSON("/api/config", body);
+      fillFx(data.config || {});
+      msg.className = "form-msg ok";
+      msg.textContent = "saved ✓";
+    } catch (e) {
+      msg.className = "form-msg err";
+      msg.textContent = e.message;
+    }
+  }
+
+  async function onFxRefresh() {
+    const msg = $("fx-msg");
+    const btn = $("fx-refresh");
+    msg.className = "form-msg";
+    msg.textContent = "refreshing…";
+    btn.disabled = true;
+    try {
+      const res = await A.postJSON("/api/fx/refresh", {});
+      const fx = res.fx || {};
+      fillFxFromRefresh(fx);
+      if (fx.ok) {
+        msg.className = "form-msg ok";
+        msg.textContent = `refreshed ✓${fx.source ? " · " + fx.source : ""}`;
+      } else {
+        msg.className = "form-msg err";
+        msg.textContent = fx.error || "FX refresh failed; kept cached rates";
+      }
+    } catch (e) {
+      msg.className = "form-msg err";
+      msg.textContent = A.isDbError(e) ? "database not configured" : e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
   async function load() {
     A.dbChip($("db-chip"));
     try {
       const data = await A.getJSON("/api/config");
-      buildForm(data.config || {});
+      const cfg = data.config || {};
+      buildForm(cfg);
+      fillFx(cfg);
     } catch (e) {
       A.showNotice($("notice"), e);
     }
@@ -86,5 +153,7 @@
     load();
     $("config-form").addEventListener("submit", onSubmit);
     $("f-reload").addEventListener("click", load);
+    $("fx-form").addEventListener("submit", onFxSubmit);
+    $("fx-refresh").addEventListener("click", onFxRefresh);
   });
 })();

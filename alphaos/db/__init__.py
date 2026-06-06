@@ -22,6 +22,7 @@ from .models import (
     Holding,
     NavSnapshot,
     PortfolioConfig,
+    PriceSource,
     Sleeve,
     SleeveKind,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "SleeveKind",
     "Holding",
     "AssetClass",
+    "PriceSource",
     "NavSnapshot",
     "DeleverStatus",
 ]

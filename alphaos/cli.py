@@ -4,6 +4,8 @@
   python -m alphaos.cli db upgrade            # run Alembic migrations to head
   python -m alphaos.cli db current            # show current migration revision
   python -m alphaos.cli db seed               # seed the V2-FRONTIER catalog
+  python -m alphaos.cli fx refresh            # refresh USD/EUR -> SEK rates
+  python -m alphaos.cli prices refresh        # refresh latest prices from MinIO
 """
 
 from __future__ import annotations
@@ -72,6 +74,44 @@ def cmd_db(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_fx(args: argparse.Namespace) -> int:
+    """Foreign-exchange rate commands."""
+    from .db import have_database, session_scope
+    from .db import fx as dbfx
+
+    if not have_database():
+        print("No database is configured (set ALPHAOS_DATABASE_URL / DATABASE_URL "
+              "or PG* environment variables).", file=sys.stderr)
+        return 1
+
+    if args.action == "refresh":
+        with session_scope() as s:
+            result = dbfx.refresh_fx(s)
+        print(result)
+        return 0 if result.get("ok") else 1
+
+    return 1
+
+
+def cmd_prices(args: argparse.Namespace) -> int:
+    """Market-price refresh commands."""
+    from .db import have_database, session_scope
+    from .db import pricing as dbpricing
+
+    if not have_database():
+        print("No database is configured (set ALPHAOS_DATABASE_URL / DATABASE_URL "
+              "or PG* environment variables).", file=sys.stderr)
+        return 1
+
+    if args.action == "refresh":
+        with session_scope() as s:
+            result = dbpricing.refresh_prices(s)
+        print(result)
+        return 0 if result.get("ok") else 1
+
+    return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="alphaos")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -85,6 +125,14 @@ def build_parser() -> argparse.ArgumentParser:
     db = sub.add_parser("db", help="Database / migration ops")
     db.add_argument("action", choices=["upgrade", "seed", "current"])
     db.set_defaults(func=cmd_db)
+
+    fx = sub.add_parser("fx", help="Foreign-exchange rate ops")
+    fx.add_argument("action", choices=["refresh"])
+    fx.set_defaults(func=cmd_fx)
+
+    prices = sub.add_parser("prices", help="Market-price refresh ops")
+    prices.add_argument("action", choices=["refresh"])
+    prices.set_defaults(func=cmd_prices)
 
     return p
 

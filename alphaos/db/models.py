@@ -40,6 +40,7 @@ class Base(DeclarativeBase):
 MONEY = Numeric(20, 4)
 RATIO = Numeric(12, 8)
 QTY = Numeric(24, 8)
+PRICE = Numeric(20, 8)  # per-unit price in the instrument's own currency
 
 
 class SleeveKind(str, enum.Enum):
@@ -65,6 +66,13 @@ class DeleverStatus(str, enum.Enum):
     half = "half"              # DD <= -35%: repay half the loan
     full = "full"              # DD <= -45%: repay the whole loan
     reentry = "reentry"        # recovering, re-levering in halves
+
+
+class PriceSource(str, enum.Enum):
+    minio = "minio"            # latest close from MinIO stocks-us
+    manual = "manual"          # current price typed by the operator
+    cost = "cost"              # no current price -> valued at purchase price
+    none = "none"             # not priced
 
 
 def _utcnow() -> dt.datetime:
@@ -100,6 +108,12 @@ class PortfolioConfig(Base):
     external_reserve: Mapped[float] = mapped_column(MONEY, default=75_000)
     planning_cagr_low: Mapped[float] = mapped_column(RATIO, default=0.10)
     planning_cagr_high: Mapped[float] = mapped_column(RATIO, default=0.16)
+
+    # FX rates to SEK (cached from Riksbank/ECB; editable). 1 unit -> SEK.
+    fx_usd_sek: Mapped[float] = mapped_column(RATIO, default=9.34)
+    fx_eur_sek: Mapped[float] = mapped_column(RATIO, default=10.87)
+    fx_as_of: Mapped[dt.date | None] = mapped_column(Date, default=None)
+    fx_source: Mapped[str | None] = mapped_column(String(32), default=None)
 
     notes: Mapped[str | None] = mapped_column(Text, default=None)
     updated_at: Mapped[dt.datetime] = mapped_column(
@@ -146,8 +160,16 @@ class Holding(Base):
     )
     currency: Mapped[str] = mapped_column(String(8), default="SEK")
     quantity: Mapped[float] = mapped_column(QTY, default=0)
-    # Current market value in base currency (SEK). Entered/updated by the operator.
-    market_value: Mapped[float] = mapped_column(MONEY, default=0)
+    # Purchase price per unit, in the holding's own currency (cost basis driver).
+    avg_price: Mapped[float] = mapped_column(PRICE, default=0)
+    # Exact SEK cost paid (from the Avanza CSV Belopp); None when not known.
+    cost_basis_sek: Mapped[float | None] = mapped_column(MONEY, default=None)
+    # Latest price per unit (instrument currency): MinIO close or a manual entry.
+    last_price: Mapped[float | None] = mapped_column(PRICE, default=None)
+    last_price_date: Mapped[dt.date | None] = mapped_column(Date, default=None)
+    price_source: Mapped[PriceSource] = mapped_column(
+        Enum(PriceSource, name="price_source"), default=PriceSource.none
+    )
     as_of: Mapped[dt.date | None] = mapped_column(Date, default=None)
     notes: Mapped[str | None] = mapped_column(Text, default=None)
     updated_at: Mapped[dt.datetime] = mapped_column(

@@ -15,6 +15,7 @@ _EDITABLE = {
     "blended_rate", "repriced_rate", "belaningsgrad_cliff",
     "delever_half_dd", "delever_full_dd", "reentry_recovery", "forced_sale_dd",
     "external_reserve", "planning_cagr_low", "planning_cagr_high", "notes",
+    "fx_usd_sek", "fx_eur_sek",
 }
 
 

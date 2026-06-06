@@ -46,6 +46,43 @@
       </form>
     </section>
 
+    <section class="card">
+      <div class="card-header">
+        <h2>FX rates (to SEK)</h2>
+        <div class="card-sub">USD/SEK &amp; EUR/SEK used to value foreign holdings · GET &amp; POST /api/config · POST /api/fx/refresh</div>
+        <div class="card-actions">
+          <span class="pill" id="fx-asof-pill">as of —</span>
+        </div>
+      </div>
+      <form id="fx-form" autocomplete="off">
+        <div class="form-grid">
+          <div class="field">
+            <label for="fx-usd">USD / SEK</label>
+            <input id="fx-usd" type="number" step="any" />
+            <span class="kpi-foot">SEK per 1 USD</span>
+          </div>
+          <div class="field">
+            <label for="fx-eur">EUR / SEK</label>
+            <input id="fx-eur" type="number" step="any" />
+            <span class="kpi-foot">SEK per 1 EUR</span>
+          </div>
+          <div class="field">
+            <label for="fx-asof">As of (read-only)</label>
+            <input id="fx-asof" type="text" readonly />
+          </div>
+          <div class="field">
+            <label for="fx-source">Source (read-only)</label>
+            <input id="fx-source" type="text" readonly />
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn">Save FX</button>
+          <button type="button" class="btn btn-ghost" id="fx-refresh">Refresh FX now</button>
+          <span id="fx-msg" class="form-msg"></span>
+        </div>
+      </form>
+    </section>
+
     <footer class="footer">
       <span>AlphaOS · V2-FRONTIER · settings (SEK base)</span>
       <span class="muted">Rates and weights are fractions (0.0234 = 2.34%). DD thresholds are negative.</span>

@@ -13,9 +13,15 @@ tracker** — a web dashboard + JSON APIs on port **8503**. All state (sleeves,
 holdings, portfolio config, NAV-index ledger) lives in **PostgreSQL** (see
 _Database (Crunchy Postgres)_ below).
 
-> **The app no longer uses MinIO / S3 or any market-data source.** There is no
-> OHLCV loader, no parquet cache, and no `ALPHAOS_USE_MINIO` toggle. The only
+> **MinIO / S3 is used again — but only read-only, and only for daily closes of
+> US stocks** (bucket `stocks-us`). It is **optional**: the app works without it
+> (US stocks simply stay at cost / a manual price). There is still no OHLCV
+> loader, no parquet cache, and no `data_cache` PVC. The only **required**
 > external dependency is the Postgres database.
+>
+> The app also fetches **FX rates** (USD/EUR→SEK) over outbound HTTPS from the
+> Riksbank (ECB fallback). This is optional too — rates are cached in the DB and
+> can be set by hand in Settings if the cluster has no egress.
 
 - Entry: `python -m alphaos.cli serve --host 0.0.0.0 --port 8503` (the image CMD).
   The CLI default host is `127.0.0.1` — **must** be `0.0.0.0` in a container/pod.
@@ -61,8 +67,9 @@ return `503` until a database is configured.
 
 ## Runtime configuration (set these in your k8s repo)
 
-The container is configured entirely via environment variables, and the only
-configuration it needs is the **database connection**.
+The container is configured entirely via environment variables. The only
+**required** configuration is the **database connection**; the **MinIO** vars
+(below) are optional and only enable US-stock price refresh.
 
 ## Database (Crunchy Postgres)
 
@@ -171,6 +178,36 @@ initContainers:
 ```
 
 `alphaos db seed` is idempotent, so it's safe to run on every rollout.
+
+## Market data (optional)
+
+### MinIO / S3 — US-stock daily closes (read-only)
+
+The app can mark **US stocks** to their latest **daily close**, read **read-only**
+from a MinIO/S3 bucket (`stocks-us`, latest daily partition). This is **entirely
+optional**: if these vars are unset (or the bucket is unreachable), price refresh
+is a no-op and US stocks simply stay at cost or at a manually entered price.
+
+| Variable | Notes |
+|---|---|
+| `MINIO_ENDPOINT_URL` | S3 endpoint URL, e.g. `https://minio.example.com` |
+| `MINIO_ACCESS_KEY_ID` | access key (read-only credential is sufficient) |
+| `MINIO_SECRET_ACCESS_KEY` | secret key |
+| `MINIO_BUCKET` | bucket holding the closes (default `stocks-us`) |
+
+Refresh prices on demand with `alphaos prices refresh` (or `POST
+/api/prices/refresh`); this sets `last_price` / `last_price_date` with
+`price_source=minio`. Nothing is ever written back to the bucket. The
+`data_cache` PVC from older versions is **still not needed**.
+
+### FX rates — outbound internet (optional)
+
+FX refresh (`alphaos fx refresh` / `POST /api/fx/refresh`) makes outbound HTTPS
+calls to **`api.riksbank.se`** (primary) and **`ecb.europa.eu`** (fallback) to
+fetch USD/EUR→SEK. Rates are **cached in the Postgres config**, so this only
+needs egress at refresh time. **If the cluster has no outbound internet**, leave
+FX refresh unused and **set the rates by hand in Settings** — the cached values
+are used for all market-value math.
 
 ## Future: LAN registry
 
