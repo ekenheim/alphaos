@@ -9,8 +9,11 @@ Image: **`ghcr.io/ekenheim/alphaos`**
 ## What the image is
 
 A FastAPI app (`alphaos.server:app`) serving a web dashboard + JSON APIs on port
-**8503**. It reads US market data from MinIO/S3 and writes a runtime parquet
-cache under `alphaos/data_cache/`.
+**8503**. It reads US market data (OHLCV bars) from MinIO/S3 and writes a runtime
+parquet cache under `alphaos/data_cache/`. The live **ledger** (positions +
+trade executions) and the **strategy/backtest archive** are stored in
+**PostgreSQL** (see _Database (Crunchy Postgres)_ below) — this replaces the old
+append-only parquet paper ledger.
 
 - Entry: `python -m alphaos.cli serve --host 0.0.0.0 --port 8503` (the image CMD).
   The CLI default host is `127.0.0.1` — **must** be `0.0.0.0` in a container/pod.
@@ -67,6 +70,115 @@ The container is configured entirely via environment variables.
 
 **Optional toggles:** `ALPHAOS_USE_MINIO=1`, `ALPHAOS_PARQUET_DIR=/path`,
 `ALPHAOS_ENV_FILE=/path/to/.env`.
+
+## Database (Crunchy Postgres)
+
+The app needs a **PostgreSQL** database. It holds the live ledger
+(strategies, positions, trade executions) and the strategy/backtest archive.
+Bars (OHLCV) still come from **MinIO/S3** — Postgres holds
+strategies/backtests/positions/trades **only**, no market data.
+
+The image already bundles the required deps (`sqlalchemy`,
+`psycopg[binary]`, `alembic`) — they're declared in `pyproject.toml` /
+`requirements.txt`, nothing extra to install.
+
+### Connection (env)
+
+Configure the connection with **either** form:
+
+| Variable | Notes |
+|---|---|
+| `DATABASE_URL` | full connection URL, e.g. `postgresql://user:pass@host:5432/dbname` |
+
+…or the discrete `PG*` parts:
+
+| Variable | Notes |
+|---|---|
+| `PGHOST` | host |
+| `PGPORT` | port (default `5432`) |
+| `PGUSER` | user |
+| `PGPASSWORD` | password |
+| `PGDATABASE` | database name |
+
+`ALPHAOS_DATABASE_URL` is also accepted and takes precedence over
+`DATABASE_URL`. The driver is **normalized to psycopg3 automatically**
+(`postgresql://` / `postgres://` → `postgresql+psycopg://`), so a raw Crunchy
+(CPNG) `uri` value works as-is — no rewriting needed.
+
+### Mapping the Crunchy (CPNG) secret
+
+Crunchy Postgres (CPNG) publishes a Secret named
+`<cluster>-pguser-<user>` with keys: `host`, `port`, `dbname`, `user`,
+`password`, and a ready-to-use `uri`. Map it in your k8s repo either way.
+
+**Simplest — map the `uri` to `DATABASE_URL`:**
+
+```yaml
+env:
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: alphaos-db-pguser-alphaos   # <cluster>-pguser-<user>
+        key: uri
+```
+
+**Or map the discrete parts:**
+
+```yaml
+env:
+  - name: PGHOST
+    valueFrom: { secretKeyRef: { name: alphaos-db-pguser-alphaos, key: host } }
+  - name: PGPORT
+    valueFrom: { secretKeyRef: { name: alphaos-db-pguser-alphaos, key: port } }
+  - name: PGUSER
+    valueFrom: { secretKeyRef: { name: alphaos-db-pguser-alphaos, key: user } }
+  - name: PGPASSWORD
+    valueFrom: { secretKeyRef: { name: alphaos-db-pguser-alphaos, key: password } }
+  - name: PGDATABASE
+    valueFrom: { secretKeyRef: { name: alphaos-db-pguser-alphaos, key: dbname } }
+```
+
+> The CPNG secret key names match both forms, so `envFrom` straight off the
+> Secret also populates `host`/`port`/`user`/`password`/`dbname`/`uri` — but the
+> app reads `PG*` / `DATABASE_URL`, so prefer the explicit `secretKeyRef`
+> mapping above (or an `envFrom` plus the `DATABASE_URL <- uri` alias).
+
+### Migrations & seeding
+
+Schema is managed with Alembic. Run the migrations **before** the app starts:
+
+```bash
+alphaos db upgrade   # apply Alembic migrations (creates/updates tables)
+alphaos db seed      # optional — populate the strategy catalog from SETUPS (idempotent)
+```
+
+The recommended place for this in your k8s repo is an **initContainer** that
+shares the same image and the same DB env as the main container:
+
+```yaml
+initContainers:
+  - name: db-migrate
+    image: ghcr.io/ekenheim/alphaos:latest
+    command: ["alphaos", "db", "upgrade"]
+    env:
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: alphaos-db-pguser-alphaos
+            key: uri
+  # optional second init step to seed the strategy catalog (idempotent):
+  - name: db-seed
+    image: ghcr.io/ekenheim/alphaos:latest
+    command: ["alphaos", "db", "seed"]
+    env:
+      - name: DATABASE_URL
+        valueFrom:
+          secretKeyRef:
+            name: alphaos-db-pguser-alphaos
+            key: uri
+```
+
+`alphaos db seed` is idempotent, so it's safe to run on every rollout.
 
 ## Future: LAN registry
 

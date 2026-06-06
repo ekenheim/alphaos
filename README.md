@@ -1,9 +1,10 @@
-# AlphaOS — multi-asset levels/momentum research engine + paper-trade ledger
+# AlphaOS — multi-asset levels/momentum research engine + live ledger
 
 Self-contained Python package: backtest engine, multi-asset levels & breakout
 research, FastAPI + static HTML/CSS/JS dashboard, MinIO/S3 historical-data
-loader with yfinance fallback, and an append-only paper-trade ledger for
-forward-testing strategies before any real money.
+loader with yfinance fallback, a **Postgres-backed live ledger** (positions +
+executions/rebalances) for forward-testing strategies before any real money, and
+a **strategy/backtest archive** that persists every saved run.
 
 > **Research surface, not investment advice.** Strategies in this repo are
 > backtested but **not** PLACEBO-validated as of the latest research log
@@ -39,6 +40,8 @@ hive-partitioned `bars/tf=*/date=*/part.parquet` layout.
 | `/`                   | META-EA hero ($ net profit), CAGR/Sharpe/PF/DD KPIs, equity curve, monthly P&L heatmap, trades-by-symbol pie, per-instrument stats table |
 | `/strategies.html`    | KPI grid, Stand-alone vs Under-prop-firm comparison cards, per-instrument breakdown table |
 | `/accounts.html`      | 7-tile KPI strip (ACCOUNTS / BLOW-UPS / ATTEMPTS / TOTAL COST / PAYOUTS / TOTAL PAID OUT / NET PROFIT) + ROI / FINAL PHASE, monthly cashflow bar chart (payouts vs challenge fees), account list table |
+| `/ledger.html`        | **Live ledger** (Postgres-backed): open/closed positions with qty, avg entry, realized P&L; per-position execution history; forms to **record an execution** (open/add/trim/close) and to **rebalance** a basket in one batch |
+| `/archive.html`       | **Strategy & backtest archive**: strategy catalog (slug/name/status/params) and the persisted backtest runs per strategy (n_trades, win%, Sharpe, max DD, CAGR, total R, PLACEBO pass) |
 | `/inspiration.html`   | Reference screenshots from `/screenshots/` rendered as a gallery with lightbox — compare the source aesthetic to AlphaOS's own pages |
 
 ## Trading style implemented
@@ -67,7 +70,19 @@ python -m alphaos.cli scan US100 --setup momentum_continuation --interval 1h
 
 # Single-symbol backtest with PLACEBO gate
 python -m alphaos.cli backtest XAUUSD --setup momentum_continuation --interval 1h --placebo 200
+
+# ...and persist the run to the Postgres backtest archive
+python -m alphaos.cli backtest XAUUSD --setup momentum_continuation --interval 1h --placebo 200 --save
+
+# Database (Postgres ledger + archive)
+alphaos db upgrade   # apply Alembic migrations (create/update tables)
+alphaos db seed      # populate the strategy catalog from SETUPS (idempotent)
 ```
+
+The live ledger and strategy/backtest archive live in **PostgreSQL**. Configure
+the connection via `DATABASE_URL` (or `PG*` parts) and run `alphaos db upgrade`
+once before first use — see [`DEPLOYMENT.md`](DEPLOYMENT.md) for the full setup
+(incl. the Crunchy/CPNG secret mapping and an initContainer example).
 
 ## API endpoints (JSON)
 
@@ -162,7 +177,7 @@ the system actually work for the operator, try in priority order:
 4. **Different setup entirely** — e.g. earnings-surprise drift, post-event
    momentum, gap-and-go on individual stocks at open.
 
-The paper-trade ledger + dashboard + MinIO loader are reusable for any
+The live (Postgres) ledger + dashboard + MinIO loader are reusable for any
 of these axes.
 
 ### 2026-06-06 — MinIO 5min→1h, multi-symbol, no-trail discovery — POSITIVE / NOT PLACEBO-VALIDATED
@@ -278,8 +293,14 @@ alphaos/
 ├── backtest.py         # vectorized event-driven backtest + metrics
 ├── placebo.py          # sticky-Markov placebo baseline
 ├── portfolio.py        # multi-instrument META-EA + prop-firm account simulator
+├── db/                 # Postgres layer: engine, models, ledger + archive services
+│   ├── __init__.py     # session_scope, have_database, get_engine, models/enums
+│   ├── engine.py       # connection from env (DATABASE_URL / PG*), psycopg3 driver
+│   ├── models.py       # Strategy, Backtest, Position, TradeEvent + enums
+│   ├── ledger.py       # record_execution / rebalance / positions / summary
+│   └── archive.py      # upsert/seed strategies, save/list backtests, performance
 ├── server.py           # FastAPI backend (static + JSON API + cache)
-├── cli.py              # CLI: scan / backtest / serve
+├── cli.py              # CLI: scan / backtest / serve / db upgrade|seed
 ├── web/
 │   ├── index.html           # overview page
 │   ├── strategies.html      # strategy comparison page

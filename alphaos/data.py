@@ -13,16 +13,35 @@ Parquet schema for (1) and (2): DatetimeIndex (UTC) named `ts_utc`, columns
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
 import pandas as pd
 
-CACHE_DIR = Path(__file__).resolve().parent / "data_cache"
-CACHE_DIR.mkdir(exist_ok=True)
-LOCAL_PARQUET_DIR = CACHE_DIR / "parquet"
-LOCAL_PARQUET_DIR.mkdir(exist_ok=True)
+
+def _ensure_cache_dir(preferred: Path) -> Path:
+    """Create `preferred`, or fall back to a temp dir if it isn't writable.
+
+    The package may be installed in a read-only location (e.g. site-packages in a
+    container). Creating the cache dir at import time must never crash; if the
+    preferred path can't be made, cache under the system temp dir instead.
+    """
+    try:
+        preferred.mkdir(parents=True, exist_ok=True)
+        return preferred
+    except OSError:
+        alt = Path(tempfile.gettempdir()) / "alphaos_cache" / preferred.name
+        try:
+            alt.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        return alt
+
+
+CACHE_DIR = _ensure_cache_dir(Path(__file__).resolve().parent / "data_cache")
+LOCAL_PARQUET_DIR = _ensure_cache_dir(CACHE_DIR / "parquet")
 
 ENV_PARQUET_DIR = os.environ.get("ALPHAOS_PARQUET_DIR")
 

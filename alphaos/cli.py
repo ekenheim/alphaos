@@ -8,10 +8,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
-
-import pandas as pd
 
 from . import data as zdata
 from . import levels as zlevels
@@ -49,14 +48,44 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     print(f"Max DD:    {res.max_dd*100:+.1f}%")
     print(f"CAGR-eq:   {res.cagr*100:+.2f}%")
 
+    placebo_pass = None
     if args.placebo:
         print(f"\nRunning PLACEBO ({args.placebo} sticky-Markov sims)...")
         pl = run_placebo(df, sig, n_runs=args.placebo,
                          stop_atr=args.stop_atr, target_atr=args.target_atr,
                          max_hold_bars=args.max_hold, cost_bps=args.cost_bps,
                          slippage_frac=args.slippage)
+        placebo_pass = pl.passed
         verdict = "PASS" if pl.passed else "FAIL"
         print(f"PLACEBO {verdict}: real Sh={pl.real_sharpe:+.2f}  P95={pl.p95:+.2f}  rank={pl.rank_pct*100:.0f}%")
+
+    if args.save:
+        from .db import have_database, session_scope, archive
+        if not have_database():
+            print("--save requested but no database is configured.", file=sys.stderr)
+            return 1
+        with session_scope() as s:
+            bt = archive.save_backtest(
+                s,
+                strategy_slug=args.setup,
+                symbol=args.symbol,
+                interval=args.interval,
+                n_trades=res.n_trades,
+                win_rate=res.win_rate,
+                avg_r=res.avg_r,
+                sharpe=res.sharpe,
+                max_dd=res.max_dd,
+                cagr=res.cagr,
+                params={
+                    "stop_atr": args.stop_atr,
+                    "target_atr": args.target_atr,
+                    "max_hold_bars": args.max_hold,
+                    "cost_bps": args.cost_bps,
+                    "slippage_frac": args.slippage,
+                },
+                placebo_pass=placebo_pass,
+            )
+            print(f"Saved backtest id={bt.id}")
     return 0
 
 
@@ -68,49 +97,50 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_paper(args: argparse.Namespace) -> int:
-    """Paper-trade ledger commands."""
-    from . import paper
-    if args.action == "scan":
-        rows = paper.scan_today()
-        if rows.empty:
-            print("No fresh signals.")
-        else:
-            print(f"Logged {len(rows)} new signal(s):")
-            for _, r in rows.iterrows():
-                print(f"  {r['signal_ts']}  {r['symbol']:<8} {r['setup']:<14} "
-                      f"long @ {r['entry_px']:.2f}  stop {r['stop_px']:.2f}  target {r['target_px']:.2f}")
+def _alembic_ini_path() -> Path:
+    """Resolve the alembic.ini path from the first existing candidate."""
+    candidates = [
+        os.environ.get("ALPHAOS_ALEMBIC_INI"),
+        Path.cwd() / "alembic.ini",
+        Path(__file__).resolve().parent.parent / "alembic.ini",
+    ]
+    for cand in candidates:
+        if cand and Path(cand).exists():
+            return Path(cand)
+    # Fall back to the package-relative path even if missing, for a clear error.
+    return Path(__file__).resolve().parent.parent / "alembic.ini"
+
+
+def cmd_db(args: argparse.Namespace) -> int:
+    """Database / migration commands."""
+    from .db import have_database, session_scope, archive
+
+    if not have_database():
+        print("No database is configured (set ALPHAOS_DATABASE_URL / DATABASE_URL "
+              "or PG* environment variables).", file=sys.stderr)
+        return 1
+
+    if args.action == "upgrade":
+        from alembic.config import Config
+        from alembic import command
+        cfg = Config(str(_alembic_ini_path()))
+        command.upgrade(cfg, "head")
+        print("Migrations upgraded to head.")
         return 0
-    if args.action == "mark":
-        closed = paper.mark_to_market()
-        print(f"Closed {closed} position(s).")
+
+    if args.action == "seed":
+        with session_scope() as s:
+            n = archive.seed_strategies_from_setups(s)
+        print(f"Seeded {n} strategy(ies) from setups.")
         return 0
-    if args.action == "status":
-        s = paper.summary()
-        print(f"Closed: {s['closed']}  Open: {s['open']}")
-        print(f"Win rate:     {s['win_rate']*100:.1f}%")
-        print(f"Profit factor: {s['pf']:.2f}")
-        print(f"Avg R:        {s['avg_r']:+.2f}")
-        print(f"Total R:      {s['total_r']:+.2f}")
-        print(f"Cum equity:   {s['cum_equity']:.3f}  ({(s['cum_equity']-1)*100:+.2f}%)")
-        if s["by_symbol"]:
-            print("\nBy symbol:")
-            for sym, st in s["by_symbol"].items():
-                print(f"  {sym:<8} n={st['count']:.0f}  totR={st['sum']:+.2f}  avgR={st['mean']:+.2f}")
-        if s["by_setup"]:
-            print("\nBy setup:")
-            for setup, st in s["by_setup"].items():
-                print(f"  {setup:<16} n={st['count']:.0f}  totR={st['sum']:+.2f}  avgR={st['mean']:+.2f}")
+
+    if args.action == "current":
+        from alembic.config import Config
+        from alembic import command
+        cfg = Config(str(_alembic_ini_path()))
+        command.current(cfg)
         return 0
-    if args.action == "ledger":
-        from . import paper
-        ledger = paper.load_ledger()
-        if ledger.empty:
-            print("Empty ledger.")
-        else:
-            with pd.option_context("display.max_columns", None, "display.width", 200):
-                print(ledger.tail(args.last).to_string())
-        return 0
+
     return 1
 
 
@@ -135,6 +165,8 @@ def build_parser() -> argparse.ArgumentParser:
     b.add_argument("--cost-bps", type=float, default=1.0)
     b.add_argument("--slippage", type=float, default=0.05)
     b.add_argument("--placebo", type=int, default=0, help="N placebo runs (0=skip)")
+    b.add_argument("--save", action="store_true",
+                   help="Persist results to the database (requires a configured DB)")
     b.set_defaults(func=cmd_backtest)
 
     sv = sub.add_parser("serve", help="Run the FastAPI web dashboard")
@@ -143,10 +175,9 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--reload", action="store_true")
     sv.set_defaults(func=cmd_serve)
 
-    pp = sub.add_parser("paper", help="Paper-trade ledger ops")
-    pp.add_argument("action", choices=["scan", "mark", "status", "ledger"])
-    pp.add_argument("--last", type=int, default=20)
-    pp.set_defaults(func=cmd_paper)
+    db = sub.add_parser("db", help="Database / migration ops")
+    db.add_argument("action", choices=["upgrade", "seed", "current"])
+    db.set_defaults(func=cmd_db)
 
     return p
 

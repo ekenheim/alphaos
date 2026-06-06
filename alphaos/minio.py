@@ -60,8 +60,27 @@ def _load_env() -> None:
 
 _load_env()
 
-CACHE_ROOT = Path(__file__).resolve().parent / "data_cache" / "minio"
-CACHE_ROOT.mkdir(parents=True, exist_ok=True)
+def _ensure_cache_dir(preferred: Path) -> Path:
+    """Create `preferred`, or fall back to a temp dir if it isn't writable.
+
+    Importing from a read-only location (e.g. site-packages in a container) must
+    not crash; fall back to the system temp dir for the cache in that case.
+    """
+    try:
+        preferred.mkdir(parents=True, exist_ok=True)
+        return preferred
+    except OSError:
+        import tempfile
+
+        alt = Path(tempfile.gettempdir()) / "alphaos_cache" / preferred.name
+        try:
+            alt.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            pass
+        return alt
+
+
+CACHE_ROOT = _ensure_cache_dir(Path(__file__).resolve().parent / "data_cache" / "minio")
 
 _BUCKET = os.getenv("MINIO_BUCKET") or os.getenv("S3_BUCKET") or "stocks-us"
 _URL = os.getenv("MINIO_ENDPOINT_URL") or os.getenv("MINIO_URL") or "http://s3-lan.ekenhome.se:9000"

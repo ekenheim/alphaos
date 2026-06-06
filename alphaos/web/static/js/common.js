@@ -3,8 +3,34 @@
 window.alphaos = {
   async getJSON(path) {
     const r = await fetch(path);
-    if (!r.ok) throw new Error(`${path}: HTTP ${r.status}`);
+    if (!r.ok) {
+      let data = {};
+      try { data = await r.json(); } catch (e) { /* non-JSON body */ }
+      const err = new Error(data.error || `${path}: HTTP ${r.status}`);
+      err.status = r.status;
+      err.data = data;
+      throw err;
+    }
     return r.json();
+  },
+
+  // POST JSON body, parse JSON response. Throws Error with .status/.data on !ok
+  // (e.g. 400 ValueError or 503 database not configured).
+  async postJSON(path, body) {
+    const r = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    let data = {};
+    try { data = await r.json(); } catch (e) { /* non-JSON body */ }
+    if (!r.ok) {
+      const err = new Error(data.error || `${path}: HTTP ${r.status}`);
+      err.status = r.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
   },
 
   fmtMoney(v, decimals = 0) {

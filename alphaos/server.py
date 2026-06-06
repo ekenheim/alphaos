@@ -16,8 +16,7 @@ import time
 from pathlib import Path
 from threading import Lock
 
-import pandas as pd
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -25,6 +24,15 @@ from .portfolio import (
     PROP_FIRMS, STRATEGY_SYMBOLS, portfolio_summary_json,
     prop_portfolio_summary_json, run_portfolio, simulate_prop_portfolio,
 )
+from .db import session_scope, have_database
+from .db import ledger as dbledger
+from .db import archive as dbarchive
+from .db.serialize import (
+    position_to_dict, event_to_dict, backtest_to_dict, strategy_to_dict,
+    jsonable,
+)
+
+_DB_UNCONFIGURED = JSONResponse(status_code=503, content={"error": "database not configured"})
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 # Screenshots live inside the package so alphaos is fully self-contained.
@@ -94,29 +102,145 @@ def inspiration() -> JSONResponse:
     return JSONResponse({"images": files})
 
 
-@app.get("/api/paper")
-def paper_endpoint() -> JSONResponse:
-    """Forward-test paper ledger + summary stats."""
-    from . import paper as zpaper
-    s = zpaper.summary()
-    ledger = zpaper.load_ledger()
-    # Serialize last 25 rows newest-first
-    rows = []
-    if not ledger.empty:
-        recent = ledger.sort_values("signal_ts", ascending=False).head(25)
-        for _, r in recent.iterrows():
-            rows.append({
-                "signal_ts": r["signal_ts"].isoformat() if pd.notna(r["signal_ts"]) else None,
-                "symbol": r["symbol"], "setup": r["setup"],
-                "entry_px": float(r["entry_px"]) if pd.notna(r["entry_px"]) else None,
-                "stop_px":  float(r["stop_px"])  if pd.notna(r["stop_px"])  else None,
-                "target_px": float(r["target_px"]) if pd.notna(r["target_px"]) else None,
-                "exit_px":  float(r["exit_px"])  if pd.notna(r["exit_px"])  else None,
-                "exit_reason": str(r["exit_reason"]) if pd.notna(r["exit_reason"]) else "",
-                "r_multiple": float(r["r_multiple"]) if pd.notna(r["r_multiple"]) else None,
-                "status": str(r["status"]),
-            })
-    return JSONResponse({"summary": s, "ledger": rows})
+# --- Ledger (live positions + trade-event ledger) ---
+
+@app.get("/api/ledger/positions")
+def ledger_positions() -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        positions = dbledger.open_positions(session)
+        summary = dbledger.ledger_summary(session)
+        return JSONResponse({
+            "positions": [position_to_dict(p) for p in positions],
+            "summary": jsonable(summary),
+        })
+
+
+@app.get("/api/ledger/positions/{position_id}")
+def ledger_position_detail(position_id: int) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        position = dbledger.position_detail(session, position_id)
+        if position is None:
+            return JSONResponse(status_code=404, content={"error": "position not found"})
+        return JSONResponse({
+            "position": position_to_dict(position),
+            "events": [event_to_dict(e) for e in position.events],
+        })
+
+
+@app.post("/api/ledger/execute")
+async def ledger_execute(request: Request) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    body = await request.json()
+    try:
+        with session_scope() as session:
+            event = dbledger.record_execution(
+                session,
+                symbol=body["symbol"],
+                action=body["action"],
+                qty=body["qty"],
+                price=body["price"],
+                side=body.get("side", "long"),
+                strategy_id=body.get("strategy_id"),
+                fees=body.get("fees", 0),
+                notes=body.get("notes"),
+                position_id=body.get("position_id"),
+            )
+            position = event.position
+            payload = {
+                "event": event_to_dict(event),
+                "position": position_to_dict(position) if position is not None else None,
+            }
+        return JSONResponse(payload)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.post("/api/ledger/rebalance")
+async def ledger_rebalance(request: Request) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    body = await request.json()
+    try:
+        with session_scope() as session:
+            events = dbledger.rebalance(
+                session,
+                body.get("legs", []),
+                note=body.get("note"),
+            )
+            batch_id = events[0].batch_id if events else None
+            # Affected positions, de-duplicated by id, in stable order.
+            seen: dict = {}
+            for ev in events:
+                pos = ev.position
+                if pos is not None and pos.id not in seen:
+                    seen[pos.id] = pos
+            payload = {
+                "batch_id": batch_id,
+                "events": [event_to_dict(e) for e in events],
+                "positions": [position_to_dict(p) for p in seen.values()],
+            }
+        return JSONResponse(payload)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+# --- Archive (strategies + backtest results) ---
+
+@app.get("/api/archive/strategies")
+def archive_strategies() -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        strategies = dbarchive.list_strategies(session)
+        return JSONResponse({
+            "strategies": [strategy_to_dict(s) for s in strategies],
+        })
+
+
+@app.post("/api/archive/strategies")
+async def archive_upsert_strategy(request: Request) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    body = await request.json()
+    try:
+        with session_scope() as session:
+            strategy = dbarchive.upsert_strategy(
+                session,
+                body["slug"],
+                name=body.get("name"),
+                description=body.get("description"),
+                status=body.get("status"),
+                params=body.get("params"),
+            )
+            payload = {"strategy": strategy_to_dict(strategy)}
+        return JSONResponse(payload)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.get("/api/archive/performance")
+def archive_performance() -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        performance = dbarchive.strategy_performance(session)
+        return JSONResponse({"performance": jsonable(performance)})
+
+
+@app.get("/api/archive/backtests")
+def archive_backtests(strategy_id: int | None = None) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        backtests = dbarchive.list_backtests(session, strategy_id=strategy_id)
+        return JSONResponse({
+            "backtests": [backtest_to_dict(b) for b in backtests],
+        })
 
 
 @app.get("/api/strategies")
