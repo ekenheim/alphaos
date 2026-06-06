@@ -1,0 +1,29 @@
+# Runtime parquet cache (regenerated at runtime under alphaos/data_cache)
+data_cache/
+alphaos/data_cache/
+
+# Python bytecode / caches
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local environment / secrets
+.env
+.env.local
+
+# Build artifacts
+*.egg-info/
+build/
+dist/
+
+# Virtual envs
+.venv/
+
+# VCS
+.git/
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# NOTE: alphaos/screenshots is package data (declared in pyproject) -> NOT excluded.

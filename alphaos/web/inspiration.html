@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AlphaOS — Inspiration</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="/static/js/common.js" defer></script>
+  <script src="/static/js/inspiration.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◆</span><span class="brand-name">AlphaOS</span><span class="brand-sub">META-EA</span>
+    </div>
+    <nav class="nav">
+      <a href="/" class="nav-link">Overview</a>
+      <a href="/strategies.html" class="nav-link">Strategies</a>
+      <a href="/accounts.html" class="nav-link">Prop accounts</a>
+      <a href="/paper.html" class="nav-link">Paper trade</a>
+      <a href="/inspiration.html" class="nav-link active">Inspiration</a>
+    </nav>
+    <div class="env">
+      <span class="env-dot live"></span><span class="env-text">simulated · research</span>
+    </div>
+  </header>
+  <main class="container">
+    <section class="card">
+      <div class="card-header">
+        <h2>Inspiration · reference screenshots</h2>
+        <div class="card-sub">Source dashboards we're modeling against (your /screenshots folder).
+          Compare layout, tile structure and aesthetic with AlphaOS's own pages.</div>
+      </div>
+      <div id="gallery" class="gallery"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-header"><h2>Side-by-side · our equivalents</h2></div>
+      <div class="grid-2 sidebyside">
+        <div class="subcard">
+          <div class="subcard-title">Reference (their site)</div>
+          <p class="muted">Click any image above to enlarge.</p>
+        </div>
+        <div class="subcard">
+          <div class="subcard-title">AlphaOS equivalent pages</div>
+          <ul class="bullet">
+            <li><a href="/">Overview</a> ↔ META-EA hero + monthly heatmap shots</li>
+            <li><a href="/strategies.html">Strategies</a> ↔ Strategy Alone vs Under FTMO shot</li>
+            <li><a href="/accounts.html">Prop accounts</a> ↔ 7-tile KPI strip + cashflow bar chart shots</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <div id="lightbox" class="lightbox hidden">
+      <span class="lightbox-close">×</span>
+      <img id="lightbox-img" alt="" />
+    </div>
+
+    <footer class="footer">
+      <span>AlphaOS · inspiration gallery</span>
+      <span class="muted">Images from /screenshots, served by the FastAPI backend.</span>
+    </footer>
+  </main>
+</body>
+</html>

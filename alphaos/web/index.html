@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AlphaOS — META-EA dashboard</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="https://cdn.plot.ly/plotly-2.30.1.min.js" defer></script>
+  <script src="/static/js/common.js" defer></script>
+  <script src="/static/js/overview.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◆</span>
+      <span class="brand-name">AlphaOS</span>
+      <span class="brand-sub">META-EA</span>
+    </div>
+    <nav class="nav">
+      <a href="/" class="nav-link active">Overview</a>
+      <a href="/strategies.html" class="nav-link">Strategies</a>
+      <a href="/accounts.html" class="nav-link">Prop accounts</a>
+      <a href="/paper.html" class="nav-link">Paper trade</a>
+      <a href="/inspiration.html" class="nav-link">Inspiration</a>
+    </nav>
+    <div class="env">
+      <span class="env-dot live"></span><span class="env-text">simulated · research</span>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- HERO: big META-EA card -->
+    <section class="hero">
+      <div class="hero-left">
+        <div class="hero-label">META-EA</div>
+        <div class="hero-value" id="hero-net-profit">—</div>
+        <div class="hero-sub" id="hero-period">loading…</div>
+      </div>
+      <div class="hero-grid">
+        <div class="mini-card"><div class="mini-label">CAGR</div><div class="mini-value pos" id="kpi-cagr">—</div></div>
+        <div class="mini-card"><div class="mini-label">Max drawdown</div><div class="mini-value neg" id="kpi-dd">—</div></div>
+        <div class="mini-card"><div class="mini-label">Sharpe</div><div class="mini-value" id="kpi-sharpe">—</div></div>
+        <div class="mini-card"><div class="mini-label">Profit factor</div><div class="mini-value" id="kpi-pf">—</div></div>
+        <div class="mini-card"><div class="mini-label">Win rate</div><div class="mini-value" id="kpi-wr">—</div></div>
+        <div class="mini-card"><div class="mini-label">Total trades</div><div class="mini-value" id="kpi-trades">—</div></div>
+      </div>
+    </section>
+
+    <!-- Equity curve -->
+    <section class="card">
+      <div class="card-header">
+        <h2>Equity curve</h2>
+        <div class="card-sub">Cumulative realized P&L</div>
+        <div class="card-actions" id="equity-actions">
+          <span class="pill" id="equity-final">Final —</span>
+          <span class="pill" id="equity-high">High —</span>
+          <span class="pill pill-neg" id="equity-dd">DD —</span>
+        </div>
+      </div>
+      <div id="equity-chart" class="chart-tall"></div>
+    </section>
+
+    <!-- Monthly performance heatmap -->
+    <section class="card">
+      <div class="card-header">
+        <h2>Monthly performance</h2>
+        <div class="card-sub">Realized $ P&L per month</div>
+      </div>
+      <div class="table-wrap">
+        <table id="monthly-table" class="monthly">
+          <thead>
+            <tr><th>YEAR</th><th>JAN</th><th>FEB</th><th>MAR</th><th>APR</th><th>MAY</th><th>JUN</th>
+                <th>JUL</th><th>AUG</th><th>SEP</th><th>OCT</th><th>NOV</th><th>DEC</th><th>TOTAL</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Two-column: trades dist + symbol contribution -->
+    <section class="grid-2">
+      <div class="card">
+        <div class="card-header"><h2>Trades distribution by symbol</h2></div>
+        <div id="dist-chart" class="chart-mid"></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><h2>Per-instrument stats</h2></div>
+        <div class="table-wrap">
+          <table id="strats-table" class="strats">
+            <thead><tr><th>Symbol</th><th>Trades</th><th>Win %</th><th>Avg R</th><th>Sharpe</th><th>Max DD</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span>AlphaOS · research surface · simulated prop-firm accounting</span>
+      <span class="muted">Discipline: causal signals · walk-forward · PLACEBO gate (CLI).
+        Not investment advice.</span>
+    </footer>
+
+  </main>
+</body>
+</html>
