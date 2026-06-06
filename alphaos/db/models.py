@@ -1,12 +1,15 @@
-"""SQLAlchemy ORM models for the AlphaOS ledger + strategy archive.
+"""SQLAlchemy ORM models for AlphaOS — V2-FRONTIER portfolio tracker.
 
-  strategies     -- catalog of strategies tried (seeded from alphaos.setups)
-  backtests      -- backtest runs per strategy + their performance metrics
-  positions      -- current ownership (mutable: qty, avg cost, status)
-  trade_events   -- append-only executions that mutate positions (open/add/trim/close/rebalance)
+The app tracks a leveraged, multi-sleeve allocation (Avanza ISK, SEK base):
 
-Money/quantity columns use Numeric(20, 8) so fractional/crypto sizes and prices
-keep exact precision (never float).
+  portfolio_config -- singleton: leverage targets, de-lever thresholds, rates, etc.
+  sleeves          -- allocation buckets (CNDX/VVSM/RAW/CA/LOWVOL) + target weights
+  holdings         -- the actual instruments held, each under a sleeve (market value, SEK)
+  nav_snapshots    -- the NAV-index/TWR ledger: equity, contributions, loan, drawdown,
+                      leverage, belaningsgrad, de-lever status per period
+
+Money/quantity columns use Numeric for exact precision (never float). All monetary
+values are in the portfolio base currency (SEK) unless noted.
 """
 
 from __future__ import annotations
@@ -15,7 +18,6 @@ import datetime as dt
 import enum
 
 from sqlalchemy import (
-    Boolean,
     Date,
     DateTime,
     Enum,
@@ -34,51 +36,89 @@ class Base(DeclarativeBase):
     pass
 
 
-# Numeric precision for prices, quantities, and PnL.
-NUM = Numeric(20, 8)
+# Money in base currency (SEK). Weights/ratios use a wider fractional scale.
+MONEY = Numeric(20, 4)
+RATIO = Numeric(12, 8)
+QTY = Numeric(24, 8)
 
 
-class StrategyStatus(str, enum.Enum):
-    experimental = "experimental"
-    active = "active"
-    archived = "archived"
+class SleeveKind(str, enum.Enum):
+    beta_core = "beta_core"
+    tilt = "tilt"
+    discretionary_equity = "discretionary_equity"
+    cross_asset_insurance = "cross_asset_insurance"
+    low_vol_carve = "low_vol_carve"
+    other = "other"
 
 
-class PositionStatus(str, enum.Enum):
-    open = "open"
-    closed = "closed"
+class AssetClass(str, enum.Enum):
+    equity = "equity"
+    etf = "etf"
+    bond = "bond"
+    commodity = "commodity"
+    cash = "cash"
+    other = "other"
 
 
-class Side(str, enum.Enum):
-    long = "long"
-    short = "short"
-
-
-class Action(str, enum.Enum):
-    open = "open"
-    add = "add"
-    trim = "trim"
-    close = "close"
-    rebalance = "rebalance"
+class DeleverStatus(str, enum.Enum):
+    normal = "normal"          # DD above the -35% trigger
+    half = "half"              # DD <= -35%: repay half the loan
+    full = "full"              # DD <= -45%: repay the whole loan
+    reentry = "reentry"        # recovering, re-levering in halves
 
 
 def _utcnow() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
 
-class Strategy(Base):
-    __tablename__ = "strategies"
+class PortfolioConfig(Base):
+    """Singleton (id=1) holding the V2-FRONTIER risk/leverage parameters."""
+
+    __tablename__ = "portfolio_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    base_currency: Mapped[str] = mapped_column(String(8), default="SEK")
+    account_label: Mapped[str] = mapped_column(String(64), default="Avanza ISK")
+
+    # Leverage + glide path (effective leverage by portfolio size).
+    leverage_target: Mapped[float] = mapped_column(RATIO, default=1.30)
+    leverage_floor: Mapped[float] = mapped_column(RATIO, default=1.00)
+    glide_low_assets: Mapped[float] = mapped_column(MONEY, default=2_500_000)
+    glide_high_assets: Mapped[float] = mapped_column(MONEY, default=10_000_000)
+
+    # Financing.
+    blended_rate: Mapped[float] = mapped_column(RATIO, default=0.0234)
+    repriced_rate: Mapped[float] = mapped_column(RATIO, default=0.0359)
+    belaningsgrad_cliff: Mapped[float] = mapped_column(RATIO, default=0.25)
+
+    # De-lever rule (binding) + ruin boundary, as NAV-index drawdown fractions.
+    delever_half_dd: Mapped[float] = mapped_column(RATIO, default=-0.35)
+    delever_full_dd: Mapped[float] = mapped_column(RATIO, default=-0.45)
+    reentry_recovery: Mapped[float] = mapped_column(RATIO, default=0.20)
+    forced_sale_dd: Mapped[float] = mapped_column(RATIO, default=-0.57)
+
+    external_reserve: Mapped[float] = mapped_column(MONEY, default=75_000)
+    planning_cagr_low: Mapped[float] = mapped_column(RATIO, default=0.10)
+    planning_cagr_high: Mapped[float] = mapped_column(RATIO, default=0.16)
+
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=_utcnow
+    )
+
+
+class Sleeve(Base):
+    __tablename__ = "sleeves"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    slug: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(128))
-    description: Mapped[str | None] = mapped_column(Text, default=None)
-    status: Mapped[StrategyStatus] = mapped_column(
-        Enum(StrategyStatus, name="strategy_status"),
-        default=StrategyStatus.experimental,
-        index=True,
+    kind: Mapped[SleeveKind] = mapped_column(
+        Enum(SleeveKind, name="sleeve_kind"), default=SleeveKind.other
     )
-    params: Mapped[dict | None] = mapped_column(JSON, default=None)
+    target_weight: Mapped[float] = mapped_column(RATIO, default=0)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    notes: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -86,107 +126,63 @@ class Strategy(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=_utcnow
     )
 
-    backtests: Mapped[list["Backtest"]] = relationship(
-        back_populates="strategy", cascade="all, delete-orphan"
+    holdings: Mapped[list["Holding"]] = relationship(
+        back_populates="sleeve", cascade="all, delete-orphan", order_by="Holding.symbol"
     )
-    positions: Mapped[list["Position"]] = relationship(back_populates="strategy")
 
 
-class Backtest(Base):
-    __tablename__ = "backtests"
+class Holding(Base):
+    __tablename__ = "holdings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    strategy_id: Mapped[int] = mapped_column(
-        ForeignKey("strategies.id", ondelete="CASCADE"), index=True
+    sleeve_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sleeves.id", ondelete="SET NULL"), index=True, default=None
     )
     symbol: Mapped[str] = mapped_column(String(32), index=True)
-    interval: Mapped[str] = mapped_column(String(8))
-    start_date: Mapped[dt.date | None] = mapped_column(Date, default=None)
-    end_date: Mapped[dt.date | None] = mapped_column(Date, default=None)
-    params: Mapped[dict | None] = mapped_column(JSON, default=None)
-
-    # Performance metrics (mirror alphaos.backtest.BacktestResult).
-    n_trades: Mapped[int] = mapped_column(Integer, default=0)
-    win_rate: Mapped[float | None] = mapped_column(Numeric(10, 6), default=None)
-    avg_r: Mapped[float | None] = mapped_column(Numeric(12, 6), default=None)
-    sharpe: Mapped[float | None] = mapped_column(Numeric(12, 6), default=None)
-    max_dd: Mapped[float | None] = mapped_column(Numeric(12, 6), default=None)
-    cagr: Mapped[float | None] = mapped_column(Numeric(12, 6), default=None)
-    total_r: Mapped[float | None] = mapped_column(Numeric(12, 6), default=None)
-    placebo_pass: Mapped[bool | None] = mapped_column(Boolean, default=None)
-
-    equity_curve: Mapped[dict | None] = mapped_column(JSON, default=None)
+    isin: Mapped[str | None] = mapped_column(String(16), default=None)
+    name: Mapped[str | None] = mapped_column(String(160), default=None)
+    asset_class: Mapped[AssetClass] = mapped_column(
+        Enum(AssetClass, name="asset_class"), default=AssetClass.equity
+    )
+    currency: Mapped[str] = mapped_column(String(8), default="SEK")
+    quantity: Mapped[float] = mapped_column(QTY, default=0)
+    # Current market value in base currency (SEK). Entered/updated by the operator.
+    market_value: Mapped[float] = mapped_column(MONEY, default=0)
+    as_of: Mapped[dt.date | None] = mapped_column(Date, default=None)
     notes: Mapped[str | None] = mapped_column(Text, default=None)
-    created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), index=True
-    )
-
-    strategy: Mapped["Strategy"] = relationship(back_populates="backtests")
-
-
-class Position(Base):
-    __tablename__ = "positions"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    symbol: Mapped[str] = mapped_column(String(32), index=True)
-    side: Mapped[Side] = mapped_column(
-        Enum(Side, name="position_side"), default=Side.long
-    )
-    status: Mapped[PositionStatus] = mapped_column(
-        Enum(PositionStatus, name="position_status"),
-        default=PositionStatus.open,
-        index=True,
-    )
-    qty: Mapped[float] = mapped_column(NUM, default=0)
-    avg_entry_px: Mapped[float] = mapped_column(NUM, default=0)
-    realized_pnl: Mapped[float] = mapped_column(NUM, default=0)
-
-    strategy_id: Mapped[int | None] = mapped_column(
-        ForeignKey("strategies.id", ondelete="SET NULL"), default=None, index=True
-    )
-    opened_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
-    closed_at: Mapped[dt.datetime | None] = mapped_column(
-        DateTime(timezone=True), default=None
-    )
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=_utcnow
     )
-    notes: Mapped[str | None] = mapped_column(Text, default=None)
 
-    strategy: Mapped["Strategy | None"] = relationship(back_populates="positions")
-    events: Mapped[list["TradeEvent"]] = relationship(
-        back_populates="position",
-        cascade="all, delete-orphan",
-        order_by="TradeEvent.ts",
-    )
+    sleeve: Mapped["Sleeve | None"] = relationship(back_populates="holdings")
 
 
-class TradeEvent(Base):
-    __tablename__ = "trade_events"
+class NavSnapshot(Base):
+    """One row per NAV-ledger observation. TWR/NAV-index/drawdown are computed
+    (see alphaos.db.nav) from equity ex-contributions, never raw account value."""
+
+    __tablename__ = "nav_snapshots"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    position_id: Mapped[int] = mapped_column(
-        ForeignKey("positions.id", ondelete="CASCADE"), index=True
+    as_of: Mapped[dt.date] = mapped_column(Date, unique=True, index=True)
+
+    gross_asset_value: Mapped[float] = mapped_column(MONEY)          # total holdings MV
+    loan_balance: Mapped[float] = mapped_column(MONEY, default=0)    # värdepapperskredit
+    net_contribution: Mapped[float] = mapped_column(MONEY, default=0)  # cash in (+) / out (-) this period
+    equity: Mapped[float] = mapped_column(MONEY)                     # gross - loan
+
+    twr_period: Mapped[float | None] = mapped_column(RATIO, default=None)
+    nav_index: Mapped[float] = mapped_column(Numeric(20, 10))
+    peak_nav_index: Mapped[float] = mapped_column(Numeric(20, 10))
+    drawdown: Mapped[float] = mapped_column(RATIO, default=0)
+
+    effective_leverage: Mapped[float | None] = mapped_column(RATIO, default=None)  # gross/equity
+    belaningsgrad: Mapped[float | None] = mapped_column(RATIO, default=None)       # loan/gross
+    delever_status: Mapped[DeleverStatus] = mapped_column(
+        Enum(DeleverStatus, name="delever_status"), default=DeleverStatus.normal
     )
-    strategy_id: Mapped[int | None] = mapped_column(
-        ForeignKey("strategies.id", ondelete="SET NULL"), default=None
-    )
-    action: Mapped[Action] = mapped_column(Enum(Action, name="trade_action"))
-    symbol: Mapped[str] = mapped_column(String(32), index=True)
-    qty: Mapped[float] = mapped_column(NUM)
-    price: Mapped[float] = mapped_column(NUM)
-    fees: Mapped[float] = mapped_column(NUM, default=0)
-    realized_pnl: Mapped[float] = mapped_column(NUM, default=0)
-    # Groups the executions of a single rebalance together.
-    batch_id: Mapped[str | None] = mapped_column(String(36), default=None, index=True)
-    ts: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), index=True
-    )
+
     notes: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
-
-    position: Mapped["Position"] = relationship(back_populates="events")

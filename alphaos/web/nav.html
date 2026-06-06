@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AlphaOS — NAV ledger</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="/static/js/common.js" defer></script>
+  <script src="/static/js/nav.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◆</span>
+      <span class="brand-name">AlphaOS</span>
+      <span class="brand-sub">V2-FRONTIER</span>
+    </div>
+    <nav class="nav">
+      <a href="/" class="nav-link">Overview</a>
+      <a href="/allocation.html" class="nav-link">Allocation</a>
+      <a href="/holdings.html" class="nav-link">Holdings</a>
+      <a href="/nav.html" class="nav-link active">NAV ledger</a>
+      <a href="/config.html" class="nav-link">Settings</a>
+    </nav>
+    <div class="env">
+      <span class="pill" id="db-chip" title="database">DB …</span>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <div id="notice" class="notice hidden"></div>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Add NAV snapshot</h2>
+        <div class="card-sub">POST /api/nav · gross blank ⇒ sum of holdings · SEK</div>
+      </div>
+      <form id="nav-form" class="form-grid" autocomplete="off">
+        <div class="field">
+          <label for="f-asof">As of</label>
+          <input id="f-asof" type="date" required />
+        </div>
+        <div class="field">
+          <label for="f-gross">Gross asset value</label>
+          <input id="f-gross" type="number" step="any" placeholder="blank = sum holdings" />
+        </div>
+        <div class="field">
+          <label for="f-loan">Loan balance</label>
+          <input id="f-loan" type="number" step="any" placeholder="0" />
+        </div>
+        <div class="field">
+          <label for="f-contrib">Net contribution</label>
+          <input id="f-contrib" type="number" step="any" placeholder="0" />
+        </div>
+        <div class="field field-wide">
+          <label for="f-notes">Notes</label>
+          <textarea id="f-notes"></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn">Add snapshot</button>
+          <span id="form-msg" class="form-msg"></span>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>NAV-index ledger</h2>
+        <div class="card-sub">TWR / NAV-index / drawdown derived from equity ex-contributions</div>
+        <div class="card-actions"><span class="pill" id="nav-count">— rows</span></div>
+      </div>
+      <div class="table-wrap">
+        <table id="nav-table">
+          <thead>
+            <tr><th>As of</th><th>Gross</th><th>Loan</th><th>Net contrib</th><th>Equity</th>
+                <th>TWR %</th><th>NAV index</th><th>Drawdown</th><th>Leverage</th>
+                <th>Belåningsgrad</th><th>Status</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <span>AlphaOS · V2-FRONTIER · NAV ledger (SEK)</span>
+      <span class="muted">Newest first. De-lever rule: half at −35%, full at −45%.</span>
+    </footer>
+
+  </main>
+</body>
+</html>

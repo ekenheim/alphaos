@@ -129,8 +129,9 @@ a { color: inherit; text-decoration: none; }
 }
 .kpi-grid.kpi-7 { grid-template-columns: repeat(7, 1fr); }
 .kpi-grid.kpi-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 520px; }
-@media (max-width: 1280px) { .kpi-grid.kpi-7 { grid-template-columns: repeat(4, 1fr); } }
-@media (max-width: 760px)  { .kpi-grid.kpi-7 { grid-template-columns: repeat(2, 1fr); } }
+.kpi-grid.kpi-risk { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 1280px) { .kpi-grid.kpi-7 { grid-template-columns: repeat(4, 1fr); } .kpi-grid.kpi-risk { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 760px)  { .kpi-grid.kpi-7 { grid-template-columns: repeat(2, 1fr); } .kpi-grid.kpi-risk { grid-template-columns: repeat(2, 1fr); } }
 
 .kpi {
   background: var(--panel); border: 1px solid var(--border);
@@ -145,6 +146,20 @@ a { color: inherit; text-decoration: none; }
 }
 .kpi-value.pos { color: var(--pos); }
 .kpi-value.neg { color: var(--neg); }
+.kpi-value.warn { color: var(--warn); }
+.kpi-foot { color: var(--muted); font-size: 11px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+/* --- De-lever status banner --- */
+.status-action { font-size: 14px; color: var(--text); }
+.status-banner-normal  { border-color: rgba(52,211,153,0.35); }
+.status-banner-half    { border-color: rgba(251,191,36,0.45); }
+.status-banner-full,
+.status-banner-forced  { border-color: rgba(248,113,113,0.45); }
+.pill.status-normal  { color: var(--pos);  border-color: rgba(52,211,153,0.25); }
+.pill.status-half    { color: var(--warn); border-color: rgba(251,191,36,0.35); }
+.pill.status-full,
+.pill.status-reentry { color: var(--neg);  border-color: rgba(248,113,113,0.35); }
+.pill.warn { color: var(--warn); border-color: rgba(251,191,36,0.35); }
 
 /* --- Subcards (strategies page) --- */
 .subcard {
@@ -256,6 +271,7 @@ table.strats td.tag {
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-ghost { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
 .btn-ghost:hover { border-color: var(--accent); filter: none; }
+.btn-sm { padding: 4px 10px; font-size: 11px; }
 
 .form-msg { font-size: 12px; min-height: 16px; }
 .form-msg.err { color: var(--neg); }

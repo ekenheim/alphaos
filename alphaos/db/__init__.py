@@ -1,46 +1,44 @@
 """AlphaOS persistence layer (SQLAlchemy 2.0 + Postgres / Crunchy).
 
-Holds relational state — strategies, backtest results, live positions, and the
-trade-event ledger. Bulk OHLCV bars stay in MinIO (see alphaos/minio.py); the DB
-is for transactional/relational data only.
-
-Connection is read from the environment (Crunchy Postgres secret); see engine.py.
+Holds the V2-FRONTIER portfolio state: config, sleeves + target weights, holdings,
+and the NAV-index/TWR ledger. Connection is read from the environment (Crunchy
+Postgres secret); see engine.py.
 """
 
 from __future__ import annotations
 
 from .engine import (
     database_url,
+    db_status,
     get_engine,
     get_sessionmaker,
     have_database,
     session_scope,
 )
 from .models import (
-    Action,
-    Backtest,
+    AssetClass,
     Base,
-    Position,
-    PositionStatus,
-    Side,
-    Strategy,
-    StrategyStatus,
-    TradeEvent,
+    DeleverStatus,
+    Holding,
+    NavSnapshot,
+    PortfolioConfig,
+    Sleeve,
+    SleeveKind,
 )
 
 __all__ = [
     "database_url",
+    "db_status",
     "get_engine",
     "get_sessionmaker",
     "have_database",
     "session_scope",
     "Base",
-    "Strategy",
-    "StrategyStatus",
-    "Backtest",
-    "Position",
-    "PositionStatus",
-    "Side",
-    "Action",
-    "TradeEvent",
+    "PortfolioConfig",
+    "Sleeve",
+    "SleeveKind",
+    "Holding",
+    "AssetClass",
+    "NavSnapshot",
+    "DeleverStatus",
 ]

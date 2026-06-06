@@ -1,132 +1,102 @@
-"""JSON serialization helpers for DB models.
+"""JSON serialization helpers for the V2-FRONTIER ORM objects.
 
-Decimal -> float, datetime -> isoformat(), enum -> .value. These produce the
-plain-dict shapes defined in the HTTP contract consumed by the dashboard UI.
+Decimal -> float, datetime/date -> isoformat, enum -> .value.
 """
 
 from __future__ import annotations
 
+import datetime as dt
+import enum
 from decimal import Decimal
-from enum import Enum
 from typing import Any
 
-
-def _num(v: Any) -> Any:
-    """Decimal/number -> float; pass through None."""
-    if v is None:
-        return None
-    if isinstance(v, Decimal):
-        return float(v)
-    return v
+from .models import Holding, NavSnapshot, PortfolioConfig, Sleeve
 
 
-def _enum(v: Any) -> Any:
-    if v is None:
-        return None
-    if isinstance(v, Enum):
-        return v.value
-    return v
+def _f(v: Any) -> float | None:
+    return float(v) if v is not None else None
 
 
-def _dt(v: Any) -> Any:
-    if v is None:
-        return None
-    return v.isoformat()
+def jsonable(value: Any) -> Any:
+    """Recursively coerce Decimal/enum/datetime/date into JSON-native types."""
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, enum.Enum):
+        return value.value
+    if isinstance(value, (dt.datetime, dt.date)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {k: jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [jsonable(v) for v in value]
+    return value
 
 
-def jsonable(v: Any) -> Any:
-    """Recursively coerce Decimal/datetime/enum inside dicts & lists for JSON.
-
-    Used for service helpers (ledger_summary, strategy_performance) that return
-    plain dicts containing Decimal values.
-    """
-    if isinstance(v, Decimal):
-        return float(v)
-    if isinstance(v, Enum):
-        return v.value
-    if isinstance(v, dict):
-        return {k: jsonable(val) for k, val in v.items()}
-    if isinstance(v, (list, tuple)):
-        return [jsonable(x) for x in v]
-    if hasattr(v, "isoformat"):
-        return v.isoformat()
-    return v
-
-
-def position_to_dict(position) -> dict:
-    strategy_slug = None
-    # Only read the relationship if it was loaded to avoid a lazy DB hit.
-    strat = getattr(position, "strategy", None)
-    if strat is not None:
-        strategy_slug = strat.slug
+def sleeve_to_dict(s: Sleeve) -> dict[str, Any]:
     return {
-        "id": position.id,
-        "symbol": position.symbol,
-        "side": _enum(position.side),
-        "status": _enum(position.status),
-        "qty": _num(position.qty),
-        "avg_entry_px": _num(position.avg_entry_px),
-        "realized_pnl": _num(position.realized_pnl),
-        "strategy_id": position.strategy_id,
-        "strategy_slug": strategy_slug,
-        "opened_at": _dt(position.opened_at),
-        "closed_at": _dt(position.closed_at),
-        "notes": position.notes,
+        "id": s.id,
+        "code": s.code,
+        "name": s.name,
+        "kind": s.kind.value,
+        "target_weight": _f(s.target_weight),
+        "sort_order": s.sort_order,
+        "notes": s.notes,
     }
 
 
-def event_to_dict(event) -> dict:
+def holding_to_dict(h: Holding) -> dict[str, Any]:
     return {
-        "id": event.id,
-        "position_id": event.position_id,
-        "strategy_id": event.strategy_id,
-        "action": _enum(event.action),
-        "symbol": event.symbol,
-        "qty": _num(event.qty),
-        "price": _num(event.price),
-        "fees": _num(event.fees),
-        "realized_pnl": _num(event.realized_pnl),
-        "batch_id": event.batch_id,
-        "ts": _dt(event.ts),
-        "notes": event.notes,
+        "id": h.id,
+        "sleeve_id": h.sleeve_id,
+        "sleeve_code": h.sleeve.code if ("sleeve" in h.__dict__ and h.sleeve) else None,
+        "symbol": h.symbol,
+        "isin": h.isin,
+        "name": h.name,
+        "asset_class": h.asset_class.value,
+        "currency": h.currency,
+        "quantity": _f(h.quantity),
+        "market_value": _f(h.market_value),
+        "as_of": h.as_of.isoformat() if h.as_of else None,
+        "notes": h.notes,
     }
 
 
-def backtest_to_dict(backtest) -> dict:
-    strategy_slug = None
-    strat = getattr(backtest, "strategy", None)
-    if strat is not None:
-        strategy_slug = strat.slug
+def nav_snapshot_to_dict(n: NavSnapshot) -> dict[str, Any]:
     return {
-        "id": backtest.id,
-        "strategy_id": backtest.strategy_id,
-        "strategy_slug": strategy_slug,
-        "symbol": backtest.symbol,
-        "interval": backtest.interval,
-        "start_date": _dt(backtest.start_date),
-        "end_date": _dt(backtest.end_date),
-        "n_trades": backtest.n_trades,
-        "win_rate": _num(backtest.win_rate),
-        "avg_r": _num(backtest.avg_r),
-        "sharpe": _num(backtest.sharpe),
-        "max_dd": _num(backtest.max_dd),
-        "cagr": _num(backtest.cagr),
-        "total_r": _num(backtest.total_r),
-        "placebo_pass": backtest.placebo_pass,
-        "created_at": _dt(backtest.created_at),
-        "notes": backtest.notes,
+        "id": n.id,
+        "as_of": n.as_of.isoformat() if n.as_of else None,
+        "gross_asset_value": _f(n.gross_asset_value),
+        "loan_balance": _f(n.loan_balance),
+        "net_contribution": _f(n.net_contribution),
+        "equity": _f(n.equity),
+        "twr_period": _f(n.twr_period),
+        "nav_index": _f(n.nav_index),
+        "peak_nav_index": _f(n.peak_nav_index),
+        "drawdown": _f(n.drawdown),
+        "effective_leverage": _f(n.effective_leverage),
+        "belaningsgrad": _f(n.belaningsgrad),
+        "delever_status": n.delever_status.value,
+        "notes": n.notes,
     }
 
 
-def strategy_to_dict(strategy) -> dict:
-    backtests = getattr(strategy, "backtests", None)
-    n_backtests = len(backtests) if backtests is not None else 0
+def config_to_dict(c: PortfolioConfig) -> dict[str, Any]:
     return {
-        "id": strategy.id,
-        "slug": strategy.slug,
-        "name": strategy.name,
-        "status": _enum(strategy.status),
-        "description": strategy.description,
-        "params": strategy.params,
-        "n_backtests": n_backtests,
+        "base_currency": c.base_currency,
+        "account_label": c.account_label,
+        "leverage_target": _f(c.leverage_target),
+        "leverage_floor": _f(c.leverage_floor),
+        "glide_low_assets": _f(c.glide_low_assets),
+        "glide_high_assets": _f(c.glide_high_assets),
+        "blended_rate": _f(c.blended_rate),
+        "repriced_rate": _f(c.repriced_rate),
+        "belaningsgrad_cliff": _f(c.belaningsgrad_cliff),
+        "delever_half_dd": _f(c.delever_half_dd),
+        "delever_full_dd": _f(c.delever_full_dd),
+        "reentry_recovery": _f(c.reentry_recovery),
+        "forced_sale_dd": _f(c.forced_sale_dd),
+        "external_reserve": _f(c.external_reserve),
+        "planning_cagr_low": _f(c.planning_cagr_low),
+        "planning_cagr_high": _f(c.planning_cagr_high),
+        "notes": c.notes,
     }

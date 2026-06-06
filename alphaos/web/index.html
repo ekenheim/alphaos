@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>AlphaOS — META-EA dashboard</title>
+  <title>AlphaOS — V2-FRONTIER risk</title>
   <link rel="stylesheet" href="/static/css/style.css" />
   <script src="https://cdn.plot.ly/plotly-2.30.1.min.js" defer></script>
   <script src="/static/js/common.js" defer></script>
@@ -14,92 +14,80 @@
     <div class="brand">
       <span class="logo">◆</span>
       <span class="brand-name">AlphaOS</span>
-      <span class="brand-sub">META-EA</span>
+      <span class="brand-sub">V2-FRONTIER</span>
     </div>
     <nav class="nav">
       <a href="/" class="nav-link active">Overview</a>
-      <a href="/strategies.html" class="nav-link">Strategies</a>
-      <a href="/accounts.html" class="nav-link">Prop accounts</a>
-      <a href="/ledger.html" class="nav-link">Ledger</a>
-      <a href="/archive.html" class="nav-link">Archive</a>
+      <a href="/allocation.html" class="nav-link">Allocation</a>
+      <a href="/holdings.html" class="nav-link">Holdings</a>
+      <a href="/nav.html" class="nav-link">NAV ledger</a>
+      <a href="/config.html" class="nav-link">Settings</a>
     </nav>
     <div class="env">
-      <span class="env-dot live"></span><span class="env-text">simulated · research</span>
-      <span class="pill" id="ds-status" title="market-data source · database">status…</span>
+      <span class="env-text" id="account-label">Avanza ISK · SEK</span>
+      <span class="pill" id="db-chip" title="database">DB …</span>
     </div>
   </header>
 
   <main class="container">
 
-    <!-- HERO: big META-EA card -->
-    <section class="hero">
-      <div class="hero-left">
-        <div class="hero-label">META-EA</div>
-        <div class="hero-value" id="hero-net-profit">—</div>
-        <div class="hero-sub" id="hero-period">loading…</div>
-      </div>
-      <div class="hero-grid">
-        <div class="mini-card"><div class="mini-label">CAGR</div><div class="mini-value pos" id="kpi-cagr">—</div></div>
-        <div class="mini-card"><div class="mini-label">Max drawdown</div><div class="mini-value neg" id="kpi-dd">—</div></div>
-        <div class="mini-card"><div class="mini-label">Sharpe</div><div class="mini-value" id="kpi-sharpe">—</div></div>
-        <div class="mini-card"><div class="mini-label">Profit factor</div><div class="mini-value" id="kpi-pf">—</div></div>
-        <div class="mini-card"><div class="mini-label">Win rate</div><div class="mini-value" id="kpi-wr">—</div></div>
-        <div class="mini-card"><div class="mini-label">Total trades</div><div class="mini-value" id="kpi-trades">—</div></div>
-      </div>
-    </section>
+    <div id="notice" class="notice hidden"></div>
 
-    <!-- Equity curve -->
-    <section class="card">
+    <!-- De-lever status banner -->
+    <section class="card" id="status-banner">
       <div class="card-header">
-        <h2>Equity curve</h2>
-        <div class="card-sub">Cumulative realized P&L</div>
-        <div class="card-actions" id="equity-actions">
-          <span class="pill" id="equity-final">Final —</span>
-          <span class="pill" id="equity-high">High —</span>
-          <span class="pill pill-neg" id="equity-dd">DD —</span>
+        <h2>De-lever status</h2>
+        <div class="card-sub" id="status-asof">—</div>
+        <div class="card-actions">
+          <span class="pill" id="status-chip">—</span>
         </div>
       </div>
-      <div id="equity-chart" class="chart-tall"></div>
+      <div id="status-action" class="status-action">loading…</div>
     </section>
 
-    <!-- Monthly performance heatmap -->
+    <!-- Risk strip -->
+    <section class="kpi-grid kpi-risk">
+      <div class="kpi"><div class="kpi-label">NAV INDEX</div><div class="kpi-value" id="t-nav">—</div><div class="kpi-foot" id="t-nav-foot">base 1.000</div></div>
+      <div class="kpi"><div class="kpi-label">PERIOD TWR</div><div class="kpi-value" id="t-twr">—</div><div class="kpi-foot">latest snapshot</div></div>
+      <div class="kpi"><div class="kpi-label">DRAWDOWN</div><div class="kpi-value" id="t-dd">—</div><div class="kpi-foot" id="t-dd-foot">off NAV-index peak</div></div>
+      <div class="kpi"><div class="kpi-label">EFF. LEVERAGE</div><div class="kpi-value" id="t-lev">—</div><div class="kpi-foot" id="t-lev-foot">target —</div></div>
+      <div class="kpi"><div class="kpi-label">BELÅNINGSGRAD</div><div class="kpi-value" id="t-belan">—</div><div class="kpi-foot" id="t-belan-foot">cliff —</div></div>
+      <div class="kpi"><div class="kpi-label">EQUITY</div><div class="kpi-value" id="t-equity">—</div><div class="kpi-foot">gross − loan</div></div>
+      <div class="kpi"><div class="kpi-label">LOAN</div><div class="kpi-value" id="t-loan">—</div><div class="kpi-foot" id="t-gross-foot">gross —</div></div>
+      <div class="kpi"><div class="kpi-label">EXTERNAL RESERVE</div><div class="kpi-value" id="t-reserve">—</div><div class="kpi-foot">off-book buffer</div></div>
+      <div class="kpi"><div class="kpi-label">PLANNING CAGR</div><div class="kpi-value" id="t-cagr">—</div><div class="kpi-foot">low – high case</div></div>
+    </section>
+
+    <!-- NAV index curve -->
     <section class="card">
       <div class="card-header">
-        <h2>Monthly performance</h2>
-        <div class="card-sub">Realized $ P&L per month</div>
-      </div>
-      <div class="table-wrap">
-        <table id="monthly-table" class="monthly">
-          <thead>
-            <tr><th>YEAR</th><th>JAN</th><th>FEB</th><th>MAR</th><th>APR</th><th>MAY</th><th>JUN</th>
-                <th>JUL</th><th>AUG</th><th>SEP</th><th>OCT</th><th>NOV</th><th>DEC</th><th>TOTAL</th></tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- Two-column: trades dist + symbol contribution -->
-    <section class="grid-2">
-      <div class="card">
-        <div class="card-header"><h2>Trades distribution by symbol</h2></div>
-        <div id="dist-chart" class="chart-mid"></div>
-      </div>
-      <div class="card">
-        <div class="card-header"><h2>Per-instrument stats</h2></div>
-        <div class="table-wrap">
-          <table id="strats-table" class="strats">
-            <thead><tr><th>Symbol</th><th>Trades</th><th>Win %</th><th>Avg R</th><th>Sharpe</th><th>Max DD</th></tr></thead>
-            <tbody></tbody>
-          </table>
+        <h2>NAV index</h2>
+        <div class="card-sub">Time-weighted equity index (ex-contributions)</div>
+        <div class="card-actions">
+          <span class="pill" id="nav-last">Last —</span>
+          <span class="pill" id="nav-peak">Peak —</span>
         </div>
       </div>
+      <div id="nav-chart" class="chart-tall"></div>
+    </section>
+
+    <!-- Drawdown area with thresholds -->
+    <section class="card">
+      <div class="card-header">
+        <h2>Drawdown</h2>
+        <div class="card-sub">Off NAV-index peak · thresholds at −35% / −45% / −57%</div>
+        <div class="card-actions">
+          <span class="pill" id="dd-half">half −35%</span>
+          <span class="pill" id="dd-full">full −45%</span>
+          <span class="pill pill-neg" id="dd-forced">forced −57%</span>
+        </div>
+      </div>
+      <div id="dd-chart" class="chart-tall"></div>
     </section>
 
     <footer class="footer">
-      <span>AlphaOS · research surface · simulated prop-firm accounting</span>
-      <span class="muted">Discipline: causal signals · walk-forward · PLACEBO gate (CLI).
-        Not investment advice.</span>
+      <span>AlphaOS · V2-FRONTIER · leveraged multi-sleeve tracker (SEK)</span>
+      <span class="muted">NAV-index TWR · de-lever rule binding · not investment advice.</span>
     </footer>
 
   </main>

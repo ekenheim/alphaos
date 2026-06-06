@@ -1,8 +1,9 @@
-"""AlphaOS — levels-based intraday/swing trading research module.
+"""AlphaOS — V2-FRONTIER portfolio tracker.
 
-Multi-asset (equities, futures, crypto, FX) levels + breakout backtest harness
-with a Streamlit operator dashboard. Backtest-first; discipline gates (PLACEBO,
-walk-forward, no look-ahead) gate any deployment talk.
+Live dashboard for a leveraged, multi-sleeve allocation strategy (Avanza ISK, SEK):
+sleeve allocation vs targets, a NAV-index/TWR ledger, leverage + belaningsgrad
+headroom, and the binding de-lever rule. FastAPI backend (alphaos.server:app) +
+PostgreSQL (alphaos.db).
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

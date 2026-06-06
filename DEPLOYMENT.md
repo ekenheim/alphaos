@@ -8,18 +8,20 @@ Image: **`ghcr.io/ekenheim/alphaos`**
 
 ## What the image is
 
-A FastAPI app (`alphaos.server:app`) serving a web dashboard + JSON APIs on port
-**8503**. It reads US market data (OHLCV bars) from MinIO/S3 and writes a runtime
-parquet cache under `alphaos/data_cache/`. The live **ledger** (positions +
-trade executions) and the **strategy/backtest archive** are stored in
-**PostgreSQL** (see _Database (Crunchy Postgres)_ below) — this replaces the old
-append-only parquet paper ledger.
+A FastAPI app (`alphaos.server:app`) serving the **V2-FRONTIER portfolio
+tracker** — a web dashboard + JSON APIs on port **8503**. All state (sleeves,
+holdings, portfolio config, NAV-index ledger) lives in **PostgreSQL** (see
+_Database (Crunchy Postgres)_ below).
+
+> **The app no longer uses MinIO / S3 or any market-data source.** There is no
+> OHLCV loader, no parquet cache, and no `ALPHAOS_USE_MINIO` toggle. The only
+> external dependency is the Postgres database.
 
 - Entry: `python -m alphaos.cli serve --host 0.0.0.0 --port 8503` (the image CMD).
   The CLI default host is `127.0.0.1` — **must** be `0.0.0.0` in a container/pod.
 - Health: `GET /api/health` → `{"ok": true}` (Dockerfile HEALTHCHECK + k8s probes).
-- Runs as non-root (uid **10001**); root filesystem can be read-only **if** you
-  mount a writable volume at `/app/alphaos/data_cache` (cache is created at import).
+- Runs as non-root (uid **10001**); the root filesystem can be **read-only** —
+  the app holds no local state, everything is in Postgres.
 
 ## Publishing the image (CI — primary path)
 
@@ -48,35 +50,24 @@ docker pull ghcr.io/ekenheim/alphaos:latest
 ```bash
 docker build -t ghcr.io/ekenheim/alphaos:dev .
 docker run --rm -p 8503:8503 \
-  -e MINIO_ACCESS_KEY_ID=... -e MINIO_SECRET_ACCESS_KEY=... \
+  -e DATABASE_URL=postgresql://user:pass@host:5432/alphaos \
   ghcr.io/ekenheim/alphaos:dev
 # then: curl http://localhost:8503/api/health  -> {"ok": true}
 ```
 
-Without MinIO credentials the app still starts and falls back to yfinance for data.
+The app needs a reachable Postgres to serve data; without `DATABASE_URL` / `PG*`
+the process still starts and `/api/health` responds, but the data endpoints
+return `503` until a database is configured.
 
 ## Runtime configuration (set these in your k8s repo)
 
-The container is configured entirely via environment variables.
-
-**MinIO / S3 credentials (secret — never commit):**
-
-| Variable | Alias | Notes |
-|---|---|---|
-| `MINIO_ENDPOINT_URL` | `MINIO_URL` | default `http://s3-lan.ekenhome.se:9000` |
-| `MINIO_ACCESS_KEY_ID` | `MINIO_USERNAME` | access key |
-| `MINIO_SECRET_ACCESS_KEY` | `MINIO_PASSWORD` | secret key |
-| `MINIO_BUCKET` | `S3_BUCKET` | default `stocks-us` |
-
-**Optional toggles:** `ALPHAOS_USE_MINIO=1`, `ALPHAOS_PARQUET_DIR=/path`,
-`ALPHAOS_ENV_FILE=/path/to/.env`.
+The container is configured entirely via environment variables, and the only
+configuration it needs is the **database connection**.
 
 ## Database (Crunchy Postgres)
 
-The app needs a **PostgreSQL** database. It holds the live ledger
-(strategies, positions, trade executions) and the strategy/backtest archive.
-Bars (OHLCV) still come from **MinIO/S3** — Postgres holds
-strategies/backtests/positions/trades **only**, no market data.
+The app needs a **PostgreSQL** database. It holds the entire portfolio state:
+sleeves, holdings, the portfolio config singleton, and the NAV-index ledger.
 
 The image already bundles the required deps (`sqlalchemy`,
 `psycopg[binary]`, `alembic`) — they're declared in `pyproject.toml` /
@@ -145,11 +136,12 @@ env:
 
 ### Migrations & seeding
 
-Schema is managed with Alembic. Run the migrations **before** the app starts:
+Schema is managed with Alembic. Run the migrations **before** the app starts,
+then seed the sleeves:
 
 ```bash
 alphaos db upgrade   # apply Alembic migrations (creates/updates tables)
-alphaos db seed      # optional — populate the strategy catalog from SETUPS (idempotent)
+alphaos db seed      # populate the five default V2-FRONTIER sleeves (idempotent)
 ```
 
 The recommended place for this in your k8s repo is an **initContainer** that
@@ -166,7 +158,7 @@ initContainers:
           secretKeyRef:
             name: alphaos-db-pguser-alphaos
             key: uri
-  # optional second init step to seed the strategy catalog (idempotent):
+  # second init step to seed the sleeves (idempotent):
   - name: db-seed
     image: ghcr.io/ekenheim/alphaos:latest
     command: ["alphaos", "db", "seed"]

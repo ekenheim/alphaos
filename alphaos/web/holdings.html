@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AlphaOS — Holdings</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="/static/js/common.js" defer></script>
+  <script src="/static/js/holdings.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◆</span>
+      <span class="brand-name">AlphaOS</span>
+      <span class="brand-sub">V2-FRONTIER</span>
+    </div>
+    <nav class="nav">
+      <a href="/" class="nav-link">Overview</a>
+      <a href="/allocation.html" class="nav-link">Allocation</a>
+      <a href="/holdings.html" class="nav-link active">Holdings</a>
+      <a href="/nav.html" class="nav-link">NAV ledger</a>
+      <a href="/config.html" class="nav-link">Settings</a>
+    </nav>
+    <div class="env">
+      <span class="pill" id="db-chip" title="database">DB …</span>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <div id="notice" class="notice hidden"></div>
+
+    <section class="card">
+      <div class="card-header">
+        <h2 id="form-title">Add / update holding</h2>
+        <div class="card-sub">POST /api/holdings · market value in SEK</div>
+        <div class="card-actions">
+          <span class="pill hidden" id="edit-pill"></span>
+        </div>
+      </div>
+      <form id="holding-form" class="form-grid" autocomplete="off">
+        <input type="hidden" id="f-id" />
+        <div class="field">
+          <label for="f-sleeve">Sleeve</label>
+          <select id="f-sleeve"></select>
+        </div>
+        <div class="field">
+          <label for="f-symbol">Symbol</label>
+          <input id="f-symbol" type="text" placeholder="CNDX" required />
+        </div>
+        <div class="field">
+          <label for="f-isin">ISIN</label>
+          <input id="f-isin" type="text" placeholder="IE00B53SZB19" />
+        </div>
+        <div class="field">
+          <label for="f-name">Name</label>
+          <input id="f-name" type="text" placeholder="iShares NASDAQ-100" />
+        </div>
+        <div class="field">
+          <label for="f-asset">Asset class</label>
+          <select id="f-asset">
+            <option value="equity">equity</option>
+            <option value="etf">etf</option>
+            <option value="bond">bond</option>
+            <option value="commodity">commodity</option>
+            <option value="cash">cash</option>
+            <option value="other">other</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-currency">Currency</label>
+          <input id="f-currency" type="text" value="SEK" />
+        </div>
+        <div class="field">
+          <label for="f-qty">Quantity</label>
+          <input id="f-qty" type="number" step="any" placeholder="0" />
+        </div>
+        <div class="field">
+          <label for="f-mv">Market value (SEK)</label>
+          <input id="f-mv" type="number" step="any" placeholder="0" />
+        </div>
+        <div class="field">
+          <label for="f-asof">As of</label>
+          <input id="f-asof" type="date" />
+        </div>
+        <div class="field field-wide">
+          <label for="f-notes">Notes</label>
+          <textarea id="f-notes"></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn" id="f-submit">Save holding</button>
+          <button type="button" class="btn btn-ghost" id="f-reset">Clear</button>
+          <span id="form-msg" class="form-msg"></span>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Holdings by sleeve</h2>
+        <div class="card-sub">Weight is market value / total gross</div>
+        <div class="card-actions"><span class="pill" id="h-total">Total —</span></div>
+      </div>
+      <div id="holdings-groups"></div>
+    </section>
+
+    <footer class="footer">
+      <span>AlphaOS · V2-FRONTIER · holdings (SEK)</span>
+      <span class="muted">Operator-entered market values.</span>
+    </footer>
+
+  </main>
+</body>
+</html>

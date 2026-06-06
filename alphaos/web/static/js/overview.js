@@ -1,143 +1,146 @@
-// Overview page — META-EA hero + equity curve + monthly heatmap + per-symbol table.
+// Overview / RISK page — risk strip + NAV-index and drawdown charts.
+(function () {
+  const A = window.alphaos;
+  const $ = (id) => document.getElementById(id);
 
-(async function () {
-  const Z = window.alphaos;
-  try {
-    const [pf, strats] = await Promise.all([
-      Z.getJSON("/api/portfolio"),
-      Z.getJSON("/api/strategies"),
-    ]);
-
-    renderHero(pf);
-    renderEquity(pf);
-    renderMonthly(pf);
-    renderDistribution(pf);
-    renderStratTable(strats);
-  } catch (e) {
-    document.querySelector("#hero-period").textContent = "Failed to load: " + e.message;
-    console.error(e);
-  }
-
-  // Data-source + DB diagnostics chip (independent of the dashboard load).
-  renderStatus();
-  async function renderStatus() {
-    const el = document.querySelector("#ds-status");
+  function setColored(el, value, opts = {}) {
     if (!el) return;
+    el.classList.remove("pos", "neg", "warn");
+    if (value == null || isNaN(value)) return;
+    const eps = opts.eps || 0;
+    if (value > eps) el.classList.add(opts.posClass || "pos");
+    else if (value < -eps) el.classList.add(opts.negClass || "neg");
+  }
+
+  function renderTiles(risk) {
+    const cfg = {
+      acct: risk.account_label || "Avanza ISK",
+      ccy: risk.base_currency || "SEK",
+    };
+    $("account-label").textContent = `${cfg.acct} · ${cfg.ccy}`;
+
+    $("t-nav").textContent = A.fmtNum(risk.nav_index, 3);
+
+    const twr = $("t-twr");
+    twr.textContent = A.fmtPct(risk.twr_period, 2);
+    setColored(twr, risk.twr_period);
+
+    const dd = $("t-dd");
+    dd.textContent = A.fmtPct(risk.drawdown, 1);
+    setColored(dd, risk.drawdown);
+    const th = risk.thresholds || {};
+    $("t-dd-foot").textContent = risk.headroom_to_half != null
+      ? `headroom to −35%: ${A.fmtPct(Math.abs(Math.min(risk.headroom_to_half, 0)), 1)}`
+      : "off NAV-index peak";
+
+    const lev = $("t-lev");
+    lev.textContent = risk.effective_leverage != null ? A.fmtNum(risk.effective_leverage, 2) + "×" : "—";
+    $("t-lev-foot").textContent = "target " + (risk.target_leverage != null ? A.fmtNum(risk.target_leverage, 2) + "×" : "—");
+    // Warn when running hotter than the glide-path target.
+    if (risk.effective_leverage != null && risk.target_leverage != null) {
+      lev.classList.toggle("warn", risk.effective_leverage > risk.target_leverage + 0.02);
+    }
+
+    const belan = $("t-belan");
+    belan.textContent = A.fmtPct(risk.belaningsgrad, 1);
+    const cliff = th.belaningsgrad_cliff;
+    const head = risk.belaningsgrad_headroom;
+    $("t-belan-foot").textContent = `cliff ${A.fmtPct(cliff, 0)}` +
+      (head != null ? ` · headroom ${A.fmtPct(head, 1)}` : "");
+    if (head != null) belan.classList.toggle("warn", head < 0.05);
+
+    $("t-equity").textContent = A.fmtSEK(risk.equity);
+    $("t-loan").textContent = A.fmtSEK(risk.loan_balance);
+    $("t-gross-foot").textContent = "gross " + A.fmtSEK(risk.gross_asset_value);
+    $("t-reserve").textContent = A.fmtSEK(risk.external_reserve);
+
+    const cagr = risk.planning_cagr || [];
+    $("t-cagr").textContent = (cagr[0] != null && cagr[1] != null)
+      ? `${A.fmtPct(cagr[0], 0)} – ${A.fmtPct(cagr[1], 0)}` : "—";
+  }
+
+  function renderStatus(risk) {
+    const status = risk.delever_status || "normal";
+    const chip = $("status-chip");
+    chip.textContent = status.toUpperCase();
+    chip.className = "pill status-" + status;
+    $("status-asof").textContent = risk.as_of ? `as of ${risk.as_of}` : "no NAV snapshots yet";
+    $("status-action").textContent = risk.action || "—";
+    const banner = $("status-banner");
+    banner.className = "card status-banner-" + status;
+  }
+
+  function navChart(snaps) {
+    const x = snaps.map((s) => s.as_of);
+    const y = snaps.map((s) => s.nav_index);
+    const last = snaps.length ? snaps[snaps.length - 1] : null;
+    if (last) {
+      $("nav-last").textContent = "Last " + A.fmtNum(last.nav_index, 3);
+      $("nav-peak").textContent = "Peak " + A.fmtNum(last.peak_nav_index, 3);
+    }
+    const traces = [{
+      x, y, type: "scatter", mode: "lines", name: "NAV index",
+      line: { color: "#4dd0e1", width: 2 },
+      hovertemplate: "%{x}<br>NAV %{y:.3f}<extra></extra>",
+    }, {
+      x, y: snaps.map((s) => s.peak_nav_index), type: "scatter", mode: "lines",
+      name: "peak", line: { color: "#6e7681", width: 1, dash: "dot" },
+      hoverinfo: "skip",
+    }];
+    Plotly.newPlot("nav-chart", traces, A.plotlyLayout({
+      yaxis: { gridcolor: "#1f2733", zerolinecolor: "#1f2733", title: "index" },
+    }), A.plotlyConfig);
+  }
+
+  function ddChart(snaps, thresholds) {
+    const x = snaps.map((s) => s.as_of);
+    const y = snaps.map((s) => (s.drawdown != null ? s.drawdown * 100 : null));
+    const trace = {
+      x, y, type: "scatter", mode: "lines", name: "drawdown",
+      fill: "tozeroy", line: { color: "#f87171", width: 2 },
+      fillcolor: "rgba(248,113,113,0.15)",
+      hovertemplate: "%{x}<br>DD %{y:.1f}%<extra></extra>",
+    };
+    const lines = [
+      { v: (thresholds.delever_half_dd ?? -0.35) * 100, c: "#fbbf24", t: "half −35%" },
+      { v: (thresholds.delever_full_dd ?? -0.45) * 100, c: "#f87171", t: "full −45%" },
+      { v: (thresholds.forced_sale_dd ?? -0.57) * 100, c: "#b91c1c", t: "forced −57%" },
+    ];
+    const shapes = lines.map((l) => ({
+      type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: l.v, y1: l.v,
+      line: { color: l.c, width: 1, dash: "dash" },
+    }));
+    const annotations = lines.map((l) => ({
+      xref: "paper", x: 1, y: l.v, xanchor: "right", yanchor: "bottom",
+      text: l.t, showarrow: false, font: { size: 10, color: l.c },
+    }));
+    const minThresh = Math.min(...lines.map((l) => l.v)) - 5;
+    Plotly.newPlot("dd-chart", [trace], A.plotlyLayout({
+      shapes, annotations,
+      yaxis: { gridcolor: "#1f2733", zerolinecolor: "#1f2733", title: "drawdown %",
+        range: [minThresh, 2], ticksuffix: "%" },
+    }), A.plotlyConfig);
+  }
+
+  async function load() {
+    A.dbChip($("db-chip"));
     try {
-      const s = await Z.getJSON("/api/status");
-      const ds = s.data_source || {};
-      const db = s.database || {};
-      const src = ds.active === "minio"
-        ? (ds.minio_reachable === false ? "MinIO ✗" : "MinIO")
-        : "yfinance";
-      const dbtxt = !db.configured ? "DB off" : (db.reachable ? "DB ✓" : "DB ✗");
-      el.textContent = `src: ${src} · ${dbtxt}`;
-      el.title = `data source: ${ds.active} (${ds.minio_endpoint || ""} / ${ds.minio_bucket || ""}) · `
-        + `db: ${db.configured ? (db.host || "configured") : "not configured"}`;
-      el.classList.toggle("pill-neg", ds.minio_reachable === false || db.reachable === false);
+      const navData = await A.getJSON("/api/nav");
+      const risk = navData.risk || {};
+      const snaps = navData.snapshots || [];
+      renderTiles(risk);
+      renderStatus(risk);
+      if (snaps.length) {
+        navChart(snaps);
+        ddChart(snaps, risk.thresholds || {});
+      } else {
+        $("nav-chart").innerHTML = '<div class="muted" style="padding:24px">No NAV snapshots yet. Add one on the NAV ledger page.</div>';
+        $("dd-chart").innerHTML = '<div class="muted" style="padding:24px">No drawdown data yet.</div>';
+      }
     } catch (e) {
-      el.textContent = "status n/a";
+      A.showNotice($("notice"), e);
     }
   }
 
-  function renderHero(pf) {
-    document.querySelector("#hero-net-profit").textContent = Z.fmtMoney(pf.net_profit);
-    const start = pf.equity_ts.length ? pf.equity_ts[0].slice(0, 10) : "—";
-    const end   = pf.equity_ts.length ? pf.equity_ts[pf.equity_ts.length - 1].slice(0, 10) : "—";
-    document.querySelector("#hero-period").textContent =
-      `${start} to ${end}  ·  ${pf.total_trades.toLocaleString()} trades`;
-
-    document.querySelector("#kpi-cagr").textContent   = Z.fmtPct(pf.cagr);
-    document.querySelector("#kpi-dd").textContent     = Z.fmtPct(pf.max_dd_pct);
-    document.querySelector("#kpi-sharpe").textContent = pf.sharpe.toFixed(2);
-    document.querySelector("#kpi-pf").textContent     = pf.profit_factor.toFixed(2);
-    document.querySelector("#kpi-wr").textContent     = Z.fmtPct(pf.win_rate);
-    document.querySelector("#kpi-trades").textContent = pf.total_trades.toLocaleString();
-  }
-
-  function renderEquity(pf) {
-    const x = pf.equity_ts;
-    const y = pf.equity_val;
-    if (!x.length) { document.querySelector("#equity-chart").innerHTML =
-        '<div style="color:var(--muted);padding:80px 0;text-align:center">No trades yet — pull more history or relax the setup filter.</div>';
-      return;
-    }
-    const high = Math.max(...y);
-    const final_ = y[y.length - 1];
-    const peak = [];
-    let running = -Infinity;
-    for (const v of y) { running = Math.max(running, v); peak.push(running); }
-    const dd = y.map((v, i) => (v / peak[i] - 1));
-    const minDD = Math.min(...dd);
-
-    document.querySelector("#equity-final").textContent = "Final " + Z.fmtMoneyShort(final_);
-    document.querySelector("#equity-high").textContent  = "High "  + Z.fmtMoneyShort(high);
-    document.querySelector("#equity-dd").textContent    = "DD "    + (minDD * 100).toFixed(1) + "%";
-
-    Plotly.newPlot("equity-chart", [
-      {
-        type: "scatter", mode: "lines", name: "Equity",
-        x, y,
-        line: { color: "#34d399", width: 2 },
-        fill: "tozeroy",
-        fillcolor: "rgba(52,211,153,0.08)",
-      },
-    ], Z.plotlyLayout({
-      showlegend: false,
-      yaxis: { gridcolor: "#1f2733", tickprefix: "$", tickformat: ",.0f" },
-    }), Z.plotlyConfig);
-  }
-
-  function renderMonthly(pf) {
-    const tb = document.querySelector("#monthly-table tbody");
-    tb.innerHTML = "";
-    if (!pf.monthly.length) return;
-    const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
-    for (const row of pf.monthly) {
-      const tr = document.createElement("tr");
-      const yearCell = `<td><b>${row.year}</b></td>`;
-      const cells = months.map(m => {
-        const v = row[m] ?? 0;
-        const cls = v > 0 ? "cell-pos" : (v < 0 ? "cell-neg" : "cell-zero");
-        return `<td class="${cls}">${v === 0 ? "—" : Z.fmtMoney(v)}</td>`;
-      }).join("");
-      const t = row.TOTAL ?? 0;
-      const totCls = t > 0 ? "cell-pos cell-total" : (t < 0 ? "cell-neg cell-total" : "cell-zero cell-total");
-      const totCell = `<td class="${totCls}">${Z.fmtMoney(t)}</td>`;
-      tr.innerHTML = yearCell + cells + totCell;
-      tb.appendChild(tr);
-    }
-  }
-
-  function renderDistribution(pf) {
-    const entries = Object.entries(pf.trades_by_symbol);
-    if (!entries.length) return;
-    const labels = entries.map(([k]) => k);
-    const values = entries.map(([, v]) => v);
-    Plotly.newPlot("dist-chart", [{
-      type: "pie",
-      labels, values,
-      hole: 0.55,
-      marker: { colors: ["#4dd0e1", "#34d399", "#f87171", "#fbbf24", "#a78bfa", "#fb923c"] },
-      textinfo: "label+percent",
-      hoverinfo: "label+value",
-    }], Z.plotlyLayout({ margin: { t: 8, b: 8, l: 8, r: 8 } }), Z.plotlyConfig);
-  }
-
-  function renderStratTable(strats) {
-    const tb = document.querySelector("#strats-table tbody");
-    tb.innerHTML = "";
-    for (const s of strats.strategies) {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td>${s.symbol}</td>
-        <td>${s.trades}</td>
-        <td>${Z.fmtPct(s.win_rate)}</td>
-        <td class="${s.avg_r > 0 ? 'cell-pos' : 'cell-neg'}">${s.avg_r.toFixed(2)}</td>
-        <td>${s.sharpe.toFixed(2)}</td>
-        <td class="cell-neg">${Z.fmtPct(s.max_dd)}</td>
-      `;
-      tb.appendChild(tr);
-    }
-  }
+  document.addEventListener("DOMContentLoaded", load);
 })();

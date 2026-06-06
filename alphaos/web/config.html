@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AlphaOS — Settings</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="/static/js/common.js" defer></script>
+  <script src="/static/js/config.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◆</span>
+      <span class="brand-name">AlphaOS</span>
+      <span class="brand-sub">V2-FRONTIER</span>
+    </div>
+    <nav class="nav">
+      <a href="/" class="nav-link">Overview</a>
+      <a href="/allocation.html" class="nav-link">Allocation</a>
+      <a href="/holdings.html" class="nav-link">Holdings</a>
+      <a href="/nav.html" class="nav-link">NAV ledger</a>
+      <a href="/config.html" class="nav-link active">Settings</a>
+    </nav>
+    <div class="env">
+      <span class="pill" id="db-chip" title="database">DB …</span>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <div id="notice" class="notice hidden"></div>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Portfolio config</h2>
+        <div class="card-sub">The V2-FRONTIER risk / leverage parameters · GET &amp; POST /api/config</div>
+      </div>
+      <form id="config-form" autocomplete="off">
+        <div id="config-fields" class="form-grid"></div>
+        <div class="form-actions">
+          <button type="submit" class="btn">Save config</button>
+          <button type="button" class="btn btn-ghost" id="f-reload">Reload</button>
+          <span id="form-msg" class="form-msg"></span>
+        </div>
+      </form>
+    </section>
+
+    <footer class="footer">
+      <span>AlphaOS · V2-FRONTIER · settings (SEK base)</span>
+      <span class="muted">Rates and weights are fractions (0.0234 = 2.34%). DD thresholds are negative.</span>
+    </footer>
+
+  </main>
+</body>
+</html>

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AlphaOS — Allocation</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="https://cdn.plot.ly/plotly-2.30.1.min.js" defer></script>
+  <script src="/static/js/common.js" defer></script>
+  <script src="/static/js/allocation.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◆</span>
+      <span class="brand-name">AlphaOS</span>
+      <span class="brand-sub">V2-FRONTIER</span>
+    </div>
+    <nav class="nav">
+      <a href="/" class="nav-link">Overview</a>
+      <a href="/allocation.html" class="nav-link active">Allocation</a>
+      <a href="/holdings.html" class="nav-link">Holdings</a>
+      <a href="/nav.html" class="nav-link">NAV ledger</a>
+      <a href="/config.html" class="nav-link">Settings</a>
+    </nav>
+    <div class="env">
+      <span class="pill" id="db-chip" title="database">DB …</span>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <div id="notice" class="notice hidden"></div>
+
+    <section class="kpi-grid kpi-2">
+      <div class="kpi"><div class="kpi-label">TOTAL GROSS VALUE</div><div class="kpi-value" id="k-total">—</div><div class="kpi-foot">sum of holding market values</div></div>
+      <div class="kpi"><div class="kpi-label">TARGET WEIGHT SUM</div><div class="kpi-value" id="k-tws">—</div><div class="kpi-foot" id="k-tws-foot">should equal 100%</div></div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Sleeves — target vs current</h2>
+        <div class="card-sub">Drift and the SEK rebalance Δ to reach target</div>
+      </div>
+      <div class="table-wrap">
+        <table id="alloc-table">
+          <thead>
+            <tr><th>Sleeve</th><th>Kind</th><th>Target %</th><th>Current %</th><th>Drift</th>
+                <th>Current value</th><th>Rebalance Δ</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header"><h2>Target vs current weight</h2></div>
+      <div id="alloc-chart" class="chart-tall"></div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Edit sleeve target weight</h2>
+        <div class="card-sub">POST /api/sleeves — weight as a fraction (0.24) or percent (24)</div>
+      </div>
+      <form id="sleeve-form" class="form-grid" autocomplete="off">
+        <div class="field">
+          <label for="f-code">Sleeve</label>
+          <select id="f-code" required></select>
+        </div>
+        <div class="field">
+          <label for="f-weight">Target weight</label>
+          <input id="f-weight" type="number" step="0.0001" min="0" placeholder="0.24" required />
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn">Save target</button>
+          <span id="form-msg" class="form-msg"></span>
+        </div>
+      </form>
+    </section>
+
+    <footer class="footer">
+      <span>AlphaOS · V2-FRONTIER · allocation (SEK)</span>
+      <span class="muted">Weights computed off total gross market value.</span>
+    </footer>
+
+  </main>
+</body>
+</html>

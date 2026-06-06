@@ -33,8 +33,8 @@ COPY . .
 RUN pip install --no-cache-dir .
 
 # --- non-root runtime user -------------------------------------------------
-# alphaos/minio.py does CACHE_ROOT.mkdir() at import time under <package>/data_cache,
-# so /app must be writable by the runtime user. Create the user and hand it /app.
+# The app writes no local files (all state lives in Postgres), so the root
+# filesystem can be read-only at runtime. Still run as a non-root user.
 RUN useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /app
 USER appuser

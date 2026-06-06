@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alphaos"
-version = "0.1.0"
-description = "Multi-asset levels + breakout research module with FastAPI dashboard and paper-trade ledger."
+version = "0.2.0"
+description = "V2-FRONTIER portfolio tracker: leveraged multi-sleeve allocation, NAV-index/TWR ledger, and de-lever risk dashboard."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "AlphaOS" }]
-keywords = ["trading", "backtest", "research", "ohlcv", "levels", "minio"]
+keywords = ["trading", "portfolio", "allocation", "leverage", "risk", "nav", "twr"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Financial and Insurance Industry",

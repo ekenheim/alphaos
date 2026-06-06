@@ -1,39 +1,39 @@
-"""FastAPI backend serving the AlphaOS dashboard.
+"""FastAPI backend serving the AlphaOS V2-FRONTIER dashboard.
 
 Endpoints:
-  GET /api/health          health probe (lightweight; used by k8s probes)
-  GET /api/status          data-source + DB diagnostics (live checks)
-  GET /api/portfolio       META-EA strategy summary (KPIs + equity + monthly heatmap)
-  GET /api/propfirm        prop-firm portfolio summary (10 sim accounts)
-  GET /api/strategies      per-instrument strategy comparison
-  GET /api/ledger/*        live positions + trade-event ledger
-  GET /api/archive/*       strategy + backtest archive
-  GET /                    serves the static dashboard
+  GET  /api/health         health probe (lightweight; used by k8s probes)
+  GET  /api/status         version + DB diagnostics
+  GET  /api/config         portfolio config (singleton)
+  POST /api/config         update editable config fields
+  GET  /api/sleeves        list sleeves
+  POST /api/sleeves        upsert a sleeve
+  GET  /api/holdings       list holdings
+  POST /api/holdings       upsert a holding
+  DELETE /api/holdings/{id} delete a holding
+  GET  /api/allocation     allocation breakdown (JSON-native)
+  GET  /api/nav            NAV snapshots + current risk
+  POST /api/nav            add a NAV snapshot
+  GET  /api/risk           current risk
+  GET  /                   serves the static dashboard
 
 Run:  python -m alphaos.cli serve   (or:  uvicorn alphaos.server:app --port 8503)
 """
 
 from __future__ import annotations
 
-import os
-import time
 from pathlib import Path
-from threading import Lock
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from .portfolio import (
-    PROP_FIRMS, STRATEGY_SYMBOLS, portfolio_summary_json,
-    prop_portfolio_summary_json, run_portfolio, simulate_prop_portfolio,
-)
-from .db import session_scope, have_database
-from .db import ledger as dbledger
-from .db import archive as dbarchive
+from .db import session_scope, have_database, db_status
+from .db import config as dbconfig
+from .db import allocation as dballoc
+from .db import nav as dbnav
 from .db.serialize import (
-    position_to_dict, event_to_dict, backtest_to_dict, strategy_to_dict,
-    jsonable,
+    jsonable, sleeve_to_dict, holding_to_dict, nav_snapshot_to_dict,
+    config_to_dict,
 )
 
 _DB_UNCONFIGURED = JSONResponse(status_code=503, content={"error": "database not configured"})
@@ -45,241 +45,188 @@ except Exception:  # pragma: no cover
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
-app = FastAPI(title="AlphaOS — META-EA prop dashboard")
+app = FastAPI(title="AlphaOS — V2-FRONTIER dashboard")
 
 app.mount("/static", StaticFiles(directory=WEB_DIR / "static"), name="static")
 
 
-# --- Cached compute (recompute on a slow cadence so the UI is snappy) ---
-
-class _Cache:
-    def __init__(self, ttl_seconds: float = 300):
-        self.ttl = ttl_seconds
-        self._lock = Lock()
-        self._runs = None
-        self._accounts = None
-        self._timestamp = 0.0
-
-    def get(self):
-        with self._lock:
-            if (time.time() - self._timestamp) > self.ttl or self._runs is None:
-                runs = run_portfolio()
-                accounts = simulate_prop_portfolio(runs)
-                self._runs = runs
-                self._accounts = accounts
-                self._timestamp = time.time()
-            return self._runs, self._accounts
-
-
-_cache = _Cache()
-
-
-# --- Routes ---
+# --- Health / status ---
 
 @app.get("/api/health")
 def health() -> dict:
     return {"ok": True}
 
 
-@app.get("/api/portfolio")
-def portfolio() -> JSONResponse:
-    runs, _ = _cache.get()
-    return JSONResponse(portfolio_summary_json(runs))
-
-
-@app.get("/api/propfirm")
-def propfirm() -> JSONResponse:
-    _, accounts = _cache.get()
-    return JSONResponse(prop_portfolio_summary_json(accounts))
-
-
 @app.get("/api/status")
 def status() -> JSONResponse:
-    """Diagnostics: which market-data source is active + DB connectivity.
-
-    Heavier than /api/health (does live reachability checks) — NOT used by the
-    k8s liveness/readiness probes, which hit /api/health.
-    """
-    from . import minio as zmin
-    from .db import engine as dbengine
-
-    minio_enabled = os.getenv("ALPHAOS_USE_MINIO") == "1"
-    minio_creds = zmin.have_credentials()
-    data_source = {
-        "active": "minio" if (minio_enabled and minio_creds) else "yfinance",
-        "minio_enabled": minio_enabled,
-        "minio_credentials": minio_creds,
-        "minio_endpoint": zmin.endpoint(),
-        "minio_bucket": zmin.bucket(),
-        "minio_reachable": zmin.check_reachable() if minio_enabled else None,
-    }
     return JSONResponse({
         "ok": True,
         "version": APP_VERSION,
-        "data_source": data_source,
-        "database": dbengine.db_status(),
+        "database": db_status(),
     })
 
 
-# --- Ledger (live positions + trade-event ledger) ---
+# --- Config ---
 
-@app.get("/api/ledger/positions")
-def ledger_positions() -> JSONResponse:
+@app.get("/api/config")
+def get_config() -> JSONResponse:
     if not have_database():
         return _DB_UNCONFIGURED
     with session_scope() as session:
-        positions = dbledger.open_positions(session)
-        summary = dbledger.ledger_summary(session)
-        return JSONResponse({
-            "positions": [position_to_dict(p) for p in positions],
-            "summary": jsonable(summary),
-        })
+        cfg = dbconfig.get_config(session)
+        return JSONResponse({"config": config_to_dict(cfg)})
 
 
-@app.get("/api/ledger/positions/{position_id}")
-def ledger_position_detail(position_id: int) -> JSONResponse:
-    if not have_database():
-        return _DB_UNCONFIGURED
-    with session_scope() as session:
-        position = dbledger.position_detail(session, position_id)
-        if position is None:
-            return JSONResponse(status_code=404, content={"error": "position not found"})
-        return JSONResponse({
-            "position": position_to_dict(position),
-            "events": [event_to_dict(e) for e in position.events],
-        })
-
-
-@app.post("/api/ledger/execute")
-async def ledger_execute(request: Request) -> JSONResponse:
+@app.post("/api/config")
+async def post_config(request: Request) -> JSONResponse:
     if not have_database():
         return _DB_UNCONFIGURED
     body = await request.json()
     try:
         with session_scope() as session:
-            event = dbledger.record_execution(
-                session,
-                symbol=body["symbol"],
-                action=body["action"],
-                qty=body["qty"],
-                price=body["price"],
-                side=body.get("side", "long"),
-                strategy_id=body.get("strategy_id"),
-                fees=body.get("fees", 0),
-                notes=body.get("notes"),
-                position_id=body.get("position_id"),
-            )
-            position = event.position
-            payload = {
-                "event": event_to_dict(event),
-                "position": position_to_dict(position) if position is not None else None,
-            }
+            cfg = dbconfig.update_config(session, **body)
+            payload = {"config": config_to_dict(cfg)}
         return JSONResponse(payload)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 
 
-@app.post("/api/ledger/rebalance")
-async def ledger_rebalance(request: Request) -> JSONResponse:
-    if not have_database():
-        return _DB_UNCONFIGURED
-    body = await request.json()
-    try:
-        with session_scope() as session:
-            events = dbledger.rebalance(
-                session,
-                body.get("legs", []),
-                note=body.get("note"),
-            )
-            batch_id = events[0].batch_id if events else None
-            # Affected positions, de-duplicated by id, in stable order.
-            seen: dict = {}
-            for ev in events:
-                pos = ev.position
-                if pos is not None and pos.id not in seen:
-                    seen[pos.id] = pos
-            payload = {
-                "batch_id": batch_id,
-                "events": [event_to_dict(e) for e in events],
-                "positions": [position_to_dict(p) for p in seen.values()],
-            }
-        return JSONResponse(payload)
-    except ValueError as e:
-        return JSONResponse(status_code=400, content={"error": str(e)})
+# --- Sleeves ---
 
-
-# --- Archive (strategies + backtest results) ---
-
-@app.get("/api/archive/strategies")
-def archive_strategies() -> JSONResponse:
+@app.get("/api/sleeves")
+def get_sleeves() -> JSONResponse:
     if not have_database():
         return _DB_UNCONFIGURED
     with session_scope() as session:
-        strategies = dbarchive.list_strategies(session)
-        return JSONResponse({
-            "strategies": [strategy_to_dict(s) for s in strategies],
-        })
+        sleeves = dballoc.list_sleeves(session)
+        return JSONResponse({"sleeves": [sleeve_to_dict(s) for s in sleeves]})
 
 
-@app.post("/api/archive/strategies")
-async def archive_upsert_strategy(request: Request) -> JSONResponse:
+@app.post("/api/sleeves")
+async def post_sleeve(request: Request) -> JSONResponse:
     if not have_database():
         return _DB_UNCONFIGURED
     body = await request.json()
     try:
         with session_scope() as session:
-            strategy = dbarchive.upsert_strategy(
+            sleeve = dballoc.upsert_sleeve(
                 session,
-                body["slug"],
+                body["code"],
                 name=body.get("name"),
-                description=body.get("description"),
-                status=body.get("status"),
-                params=body.get("params"),
+                kind=body.get("kind"),
+                target_weight=body.get("target_weight"),
+                sort_order=body.get("sort_order"),
+                notes=body.get("notes"),
             )
-            payload = {"strategy": strategy_to_dict(strategy)}
+            payload = {"sleeve": sleeve_to_dict(sleeve)}
         return JSONResponse(payload)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 
 
-@app.get("/api/archive/performance")
-def archive_performance() -> JSONResponse:
+# --- Holdings ---
+
+@app.get("/api/holdings")
+def get_holdings() -> JSONResponse:
     if not have_database():
         return _DB_UNCONFIGURED
     with session_scope() as session:
-        performance = dbarchive.strategy_performance(session)
-        return JSONResponse({"performance": jsonable(performance)})
+        holdings = dballoc.list_holdings(session)
+        return JSONResponse({"holdings": [holding_to_dict(h) for h in holdings]})
 
 
-@app.get("/api/archive/backtests")
-def archive_backtests(strategy_id: int | None = None) -> JSONResponse:
+@app.post("/api/holdings")
+async def post_holding(request: Request) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    body = await request.json()
+    try:
+        with session_scope() as session:
+            holding = dballoc.upsert_holding(
+                session,
+                id=body.get("id"),
+                sleeve_code=body.get("sleeve_code"),
+                sleeve_id=body.get("sleeve_id"),
+                symbol=body["symbol"],
+                isin=body.get("isin"),
+                name=body.get("name"),
+                asset_class=body.get("asset_class"),
+                currency=body.get("currency", "SEK"),
+                quantity=body.get("quantity", 0),
+                market_value=body.get("market_value", 0),
+                as_of=body.get("as_of"),
+                notes=body.get("notes"),
+            )
+            payload = {"holding": holding_to_dict(holding)}
+        return JSONResponse(payload)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.delete("/api/holdings/{holding_id}")
+def delete_holding(holding_id: int) -> JSONResponse:
     if not have_database():
         return _DB_UNCONFIGURED
     with session_scope() as session:
-        backtests = dbarchive.list_backtests(session, strategy_id=strategy_id)
+        deleted = dballoc.delete_holding(session, holding_id)
+        return JSONResponse({"deleted": deleted})
+
+
+# --- Allocation ---
+
+@app.get("/api/allocation")
+def get_allocation() -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        return JSONResponse(jsonable(dballoc.allocation(session)))
+
+
+# --- NAV / risk ---
+
+@app.get("/api/nav")
+def get_nav() -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        snapshots = dbnav.list_snapshots(session)
+        risk = dbnav.current_risk(session)
         return JSONResponse({
-            "backtests": [backtest_to_dict(b) for b in backtests],
+            "snapshots": [nav_snapshot_to_dict(n) for n in snapshots],
+            "risk": jsonable(risk),
         })
 
 
-@app.get("/api/strategies")
-def strategies() -> JSONResponse:
-    runs, _ = _cache.get()
-    out = []
-    for r in runs:
-        res = r.result
-        out.append(dict(
-            symbol=r.symbol,
-            setup=r.setup,
-            trades=res.n_trades,
-            win_rate=res.win_rate,
-            avg_r=res.avg_r,
-            sharpe=res.sharpe,
-            max_dd=res.max_dd,
-            cagr=res.cagr,
-        ))
-    return JSONResponse({"strategies": out, "symbols": STRATEGY_SYMBOLS, "firms": PROP_FIRMS})
+@app.post("/api/nav")
+async def post_nav(request: Request) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    body = await request.json()
+    try:
+        with session_scope() as session:
+            snapshot = dbnav.add_snapshot(
+                session,
+                as_of=body["as_of"],
+                gross_asset_value=body.get("gross_asset_value"),
+                loan_balance=body.get("loan_balance", 0),
+                net_contribution=body.get("net_contribution", 0),
+                notes=body.get("notes"),
+            )
+            payload = {"snapshot": nav_snapshot_to_dict(snapshot)}
+        return JSONResponse(payload)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
 
+
+@app.get("/api/risk")
+def get_risk() -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        return JSONResponse({"risk": jsonable(dbnav.current_risk(session))})
+
+
+# --- Static dashboard ---
 
 @app.get("/")
 def index() -> FileResponse:
