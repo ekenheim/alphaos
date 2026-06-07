@@ -15,24 +15,18 @@
       grid-auto-columns: 12px; gap: 3px; width: max-content; }
     .hm-cell { width: 12px; height: 12px; border-radius: 2px; background: #1b1f24; cursor: pointer; }
     .hm-cell:hover { outline: 1px solid #4dd0e1; }
-    /* Money feed */
-    .feed { max-height: 460px; overflow-y: auto; }
-    .feed-row { display: flex; align-items: center; gap: 12px; padding: 7px 8px;
-      border-bottom: 1px solid #1f2733; cursor: pointer; font-variant-numeric: tabular-nums; }
-    .feed-row:hover { background: #161b22; }
-    .feed-date { width: 54px; color: #8b949e; font-size: 13px; }
-    .feed-pnl { width: 120px; font-weight: 600; }
-    .feed-val { width: 110px; color: #c9d1d9; }
-    .feed-pct { width: 64px; font-size: 12px; }
-    .feed-ev { color: #d29922; font-size: 12px; }
+    /* Selected-day holdings panel under the calendar */
     .feed-pos { color: #3fb950; }
     .feed-neg { color: #f85149; }
-    .feed-holdings { padding: 8px 8px 12px 74px; background: #0d1117; border-bottom: 1px solid #1f2733; }
-    .feed-holdings table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    .feed-holdings td, .feed-holdings th { padding: 3px 8px; text-align: right; color: #c9d1d9;
+    .feed-ev { color: #d29922; font-size: 12px; }
+    .cal-holdings { margin-top: 8px; }
+    .cal-h-head { padding: 6px 8px; color: #c9d1d9; font-size: 13px;
+      border-top: 1px solid #1f2733; font-variant-numeric: tabular-nums; }
+    .cal-holdings table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .cal-holdings td, .cal-holdings th { padding: 3px 8px; text-align: right; color: #c9d1d9;
       font-variant-numeric: tabular-nums; }
-    .feed-holdings th { color: #8b949e; font-weight: 500; }
-    .feed-holdings td:first-child, .feed-holdings th:first-child { text-align: left; }
+    .cal-holdings th { color: #8b949e; font-weight: 500; }
+    .cal-holdings td:first-child, .cal-holdings th:first-child { text-align: left; }
   </style>
 </head>
 <body>
@@ -94,15 +88,7 @@
         <div class="card-actions"><span class="pill" id="cal-sum">—</span></div>
       </div>
       <div id="cal-heatmap" class="heatmap-wrap"></div>
-    </section>
-
-    <!-- Money feed: per-day, click to expand holdings -->
-    <section class="card">
-      <div class="card-header">
-        <h2>Money feed</h2>
-        <div class="card-sub">Day by day, newest first · click a day to see what was held</div>
-      </div>
-      <div id="money-feed" class="feed"></div>
+      <div id="cal-holdings" class="cal-holdings"></div>
     </section>
 
     <!-- Account value vs cost -->

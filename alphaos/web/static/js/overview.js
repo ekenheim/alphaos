@@ -2,6 +2,7 @@
 (function () {
   const A = window.alphaos;
   const $ = (id) => document.getElementById(id);
+  let journalByDate = {};
 
   function setColored(el, value, opts = {}) {
     if (!el) return;
@@ -153,9 +154,9 @@
 
   function renderHeatmap(j) {
     const el = $("cal-heatmap");
-    const byDate = {};
+    journalByDate = {};
     let maxAbs = 0, total = 0;
-    j.forEach((r) => { byDate[r.date] = r; maxAbs = Math.max(maxAbs, Math.abs(r.day_pnl)); total += r.day_pnl; });
+    j.forEach((r) => { journalByDate[r.date] = r; maxAbs = Math.max(maxAbs, Math.abs(r.day_pnl)); total += r.day_pnl; });
     // Monday-align the first day (UTC noon avoids any timezone date-shift).
     const last = new Date(j[j.length - 1].date + "T12:00:00Z");
     const start = new Date(j[0].date + "T12:00:00Z");
@@ -164,7 +165,7 @@
     grid.className = "heatmap";
     for (let d = new Date(start); d <= last; d.setUTCDate(d.getUTCDate() + 1)) {
       const iso = d.toISOString().slice(0, 10);
-      const r = byDate[iso];
+      const r = journalByDate[iso];
       const cell = document.createElement("div");
       cell.className = "hm-cell";
       if (r) {
@@ -180,48 +181,24 @@
     el.appendChild(grid);
     grid.addEventListener("click", (e) => {
       const c = e.target.closest(".hm-cell");
-      if (!c || !c.dataset.date) return;
-      const row = document.querySelector(`.feed-row[data-date="${c.dataset.date}"]`);
-      if (row) { row.scrollIntoView({ block: "center" }); toggleHoldings(row); }
+      if (c && c.dataset.date) showHoldings(c.dataset.date);
     });
     $("cal-sum").textContent = "net " + A.fmtSEKSigned(total);
   }
 
-  // --- Money feed (one row per day; click to expand that day's holdings) ---
-
-  function feedRow(r, prevValue) {
-    const cls = r.day_pnl > 0 ? "feed-pos" : (r.day_pnl < 0 ? "feed-neg" : "");
-    const arrow = r.day_pnl > 0 ? "▲" : (r.day_pnl < 0 ? "▼" : "·");
-    const pct = prevValue > 0 ? A.fmtPct(r.day_pnl / prevValue, 2) : "";
-    const ev = r.event ? `<span class="feed-ev">• ${r.event}</span>` : "";
-    return `<div class="feed-row" data-date="${r.date}">` +
-      `<span class="feed-date">${r.date.slice(5)}</span>` +
-      `<span class="feed-pnl ${cls}">${arrow} ${A.fmtSEKSigned(r.day_pnl)}</span>` +
-      `<span class="feed-val">${A.fmtSEK(r.value)}</span>` +
-      `<span class="feed-pct ${cls}">${pct}</span>${ev}</div>`;
-  }
-
-  function renderFeed(j) {
-    const el = $("money-feed");
-    const out = [];
-    for (let i = j.length - 1; i >= 0; i--) out.push(feedRow(j[i], i > 0 ? j[i - 1].value : 0));
-    el.innerHTML = out.join("");
-    el.querySelectorAll(".feed-row").forEach((row) =>
-      row.addEventListener("click", () => toggleHoldings(row)));
-  }
-
-  async function toggleHoldings(row) {
-    const next = row.nextElementSibling;
-    if (next && next.classList.contains("feed-holdings")) { next.remove(); return; }
-    document.querySelectorAll(".feed-holdings").forEach((n) => n.remove());
-    const box = document.createElement("div");
-    box.className = "feed-holdings";
-    box.textContent = "loading…";
-    row.after(box);
+  // Clicking a calendar day shows what was held that day, with its valuation.
+  async function showHoldings(date) {
+    const box = $("cal-holdings");
+    const r = journalByDate[date];
+    const cls = r && r.day_pnl >= 0 ? "feed-pos" : "feed-neg";
+    const head = `<div class="cal-h-head">${date}` +
+      (r ? ` · <span class="${cls}">${A.fmtSEKSigned(r.day_pnl)}</span> · value ${A.fmtSEK(r.value)}` +
+        (r.event ? ` · <span class="feed-ev">${r.event}</span>` : "") : "") + "</div>";
+    box.innerHTML = head + '<div class="muted" style="padding:6px 8px">loading…</div>';
     try {
-      const hs = (await A.getJSON(`/api/nav/holdings-on?date=${row.dataset.date}`)).holdings || [];
-      if (!hs.length) { box.innerHTML = '<span class="muted">nothing held</span>'; return; }
-      box.innerHTML = "<table><thead><tr><th>Holding</th><th>Qty</th><th>Price</th>" +
+      const hs = (await A.getJSON(`/api/nav/holdings-on?date=${date}`)).holdings || [];
+      if (!hs.length) { box.innerHTML = head + '<div class="muted" style="padding:6px 8px">nothing held</div>'; return; }
+      box.innerHTML = head + "<table><thead><tr><th>Holding</th><th>Qty</th><th>Price</th>" +
         "<th>Value</th><th>P&amp;L</th></tr></thead><tbody>" +
         hs.map((h) => `<tr><td>${h.symbol || h.isin}${h.priced ? "" : " <span class='muted'>(cost)</span>"}</td>` +
           `<td>${A.fmtNum(h.quantity, 2)}</td><td>${A.fmtNum(h.price, 2)}</td>` +
@@ -229,7 +206,7 @@
           `<td class="${h.pnl >= 0 ? "feed-pos" : "feed-neg"}">${A.fmtSEKSigned(h.pnl)}</td></tr>`).join("") +
         "</tbody></table>";
     } catch (e) {
-      box.innerHTML = `<span class="feed-neg">${e.message}</span>`;
+      box.innerHTML = head + `<div class="feed-neg" style="padding:6px 8px">${e.message}</div>`;
     }
   }
 
@@ -248,10 +225,9 @@
         valueChart(j);
         drawdownChart(j);
         renderHeatmap(j);
-        renderFeed(j);
       } else {
         const msg = '<div class="muted" style="padding:24px">No history yet — import transactions and assign holdings to sleeves.</div>';
-        ["nav-chart", "dd-chart", "cal-heatmap", "money-feed"].forEach((id) => { $(id).innerHTML = msg; });
+        ["nav-chart", "dd-chart", "cal-heatmap"].forEach((id) => { $(id).innerHTML = msg; });
       }
     } catch (e) {
       A.showNotice($("notice"), e);
