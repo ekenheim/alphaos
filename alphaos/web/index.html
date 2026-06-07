@@ -60,28 +60,26 @@
       <div class="kpi"><div class="kpi-label">PLANNING CAGR</div><div class="kpi-value" id="t-cagr">—</div><div class="kpi-foot">low – high case</div></div>
     </section>
 
-    <!-- NAV index curve -->
+    <!-- Account value vs cost -->
     <section class="card">
       <div class="card-header">
-        <h2>NAV index</h2>
-        <div class="card-sub">Time-weighted equity index (ex-contributions)</div>
+        <h2>Account value vs cost</h2>
+        <div class="card-sub">Market value vs cost basis · the gap is your unrealized P&amp;L (SEK)</div>
         <div class="card-actions">
-          <span class="pill" id="nav-last">Last —</span>
-          <span class="pill" id="nav-peak">Peak —</span>
+          <span class="pill" id="nav-last">Value —</span>
+          <span class="pill" id="nav-peak">P&amp;L —</span>
         </div>
       </div>
       <div id="nav-chart" class="chart-tall"></div>
     </section>
 
-    <!-- Drawdown area with thresholds -->
+    <!-- Drawdown off account high -->
     <section class="card">
       <div class="card-header">
         <h2>Drawdown</h2>
-        <div class="card-sub">Off NAV-index peak · thresholds at −35% / −45% / −57%</div>
+        <div class="card-sub">How far below your account's peak value</div>
         <div class="card-actions">
-          <span class="pill" id="dd-half">half −35%</span>
-          <span class="pill" id="dd-full">full −45%</span>
-          <span class="pill pill-neg" id="dd-forced">forced −57%</span>
+          <span class="pill pill-neg" id="dd-max">max —</span>
         </div>
       </div>
       <div id="dd-chart" class="chart-tall"></div>

@@ -97,55 +97,54 @@
     banner.className = "card status-banner-" + status;
   }
 
-  function navChart(snaps) {
+  // Account value vs cost basis. The gap between the lines is unrealized P&L —
+  // deposits/buys raise BOTH lines together, so only market moves change the gap.
+  function valueChart(snaps) {
     const x = snaps.map((s) => s.as_of);
-    const y = snaps.map((s) => s.nav_index);
+    const value = snaps.map((s) => s.gross_asset_value);
+    const cost = snaps.map((s) => s.cost_basis);
     const last = snaps.length ? snaps[snaps.length - 1] : null;
     if (last) {
-      $("nav-last").textContent = "Last " + A.fmtNum(last.nav_index, 3);
-      $("nav-peak").textContent = "Peak " + A.fmtNum(last.peak_nav_index, 3);
+      $("nav-last").textContent = "Value " + A.fmtSEK(last.gross_asset_value);
+      const pnl = (last.gross_asset_value != null && last.cost_basis != null)
+        ? last.gross_asset_value - last.cost_basis : null;
+      $("nav-peak").textContent = pnl != null ? "P&L " + A.fmtSEKSigned(pnl) : "P&L —";
     }
     const traces = [{
-      x, y, type: "scatter", mode: "lines", name: "NAV index",
+      x, y: value, type: "scatter", mode: "lines", name: "value",
       line: { color: "#4dd0e1", width: 2 },
-      hovertemplate: "%{x}<br>NAV %{y:.3f}<extra></extra>",
+      hovertemplate: "%{x}<br>value %{y:,.0f} kr<extra></extra>",
     }, {
-      x, y: snaps.map((s) => s.peak_nav_index), type: "scatter", mode: "lines",
-      name: "peak", line: { color: "#6e7681", width: 1, dash: "dot" },
-      hoverinfo: "skip",
+      x, y: cost, type: "scatter", mode: "lines", name: "cost basis",
+      line: { color: "#6e7681", width: 1, dash: "dot" },
+      hovertemplate: "%{x}<br>cost %{y:,.0f} kr<extra></extra>",
     }];
     Plotly.newPlot("nav-chart", traces, A.plotlyLayout({
-      yaxis: { gridcolor: "#1f2733", zerolinecolor: "#1f2733", title: "index" },
+      yaxis: { gridcolor: "#1f2733", zerolinecolor: "#1f2733", title: "SEK" },
     }), A.plotlyConfig);
   }
 
-  function ddChart(snaps, thresholds) {
+  // Drawdown off the running peak of account value (no contribution data needed).
+  function drawdownChart(snaps) {
     const x = snaps.map((s) => s.as_of);
-    const y = snaps.map((s) => (s.drawdown != null ? s.drawdown * 100 : null));
+    let peak = -Infinity;
+    const y = snaps.map((s) => {
+      const v = s.equity != null ? s.equity : s.gross_asset_value;
+      if (v == null) return null;
+      if (v > peak) peak = v;
+      return peak > 0 ? (v / peak - 1) * 100 : 0;
+    });
+    const minDD = Math.min(0, ...y.filter((v) => v != null));
+    $("dd-max").textContent = "max " + minDD.toFixed(1) + "%";
     const trace = {
       x, y, type: "scatter", mode: "lines", name: "drawdown",
       fill: "tozeroy", line: { color: "#f87171", width: 2 },
       fillcolor: "rgba(248,113,113,0.15)",
-      hovertemplate: "%{x}<br>DD %{y:.1f}%<extra></extra>",
+      hovertemplate: "%{x}<br>%{y:.1f}%<extra></extra>",
     };
-    const lines = [
-      { v: (thresholds.delever_half_dd ?? -0.35) * 100, c: "#fbbf24", t: "half −35%" },
-      { v: (thresholds.delever_full_dd ?? -0.45) * 100, c: "#f87171", t: "full −45%" },
-      { v: (thresholds.forced_sale_dd ?? -0.57) * 100, c: "#b91c1c", t: "forced −57%" },
-    ];
-    const shapes = lines.map((l) => ({
-      type: "line", xref: "paper", x0: 0, x1: 1, yref: "y", y0: l.v, y1: l.v,
-      line: { color: l.c, width: 1, dash: "dash" },
-    }));
-    const annotations = lines.map((l) => ({
-      xref: "paper", x: 1, y: l.v, xanchor: "right", yanchor: "bottom",
-      text: l.t, showarrow: false, font: { size: 10, color: l.c },
-    }));
-    const minThresh = Math.min(...lines.map((l) => l.v)) - 5;
     Plotly.newPlot("dd-chart", [trace], A.plotlyLayout({
-      shapes, annotations,
       yaxis: { gridcolor: "#1f2733", zerolinecolor: "#1f2733", title: "drawdown %",
-        range: [minThresh, 2], ticksuffix: "%" },
+        range: [Math.min(minDD - 2, -5), 2], ticksuffix: "%" },
     }), A.plotlyConfig);
   }
 
@@ -157,15 +156,11 @@
       const snaps = navData.snapshots || [];
       renderTiles(risk);
       renderStatus(risk);
-      if (risk.nav_index_reliable === false) {
-        const why = risk.nav_index_note || "insufficient data";
-        $("nav-chart").innerHTML = `<div class="muted" style="padding:24px">NAV-index history isn't reliable yet — ${why}. Track money-terms P&amp;L above; record all deposits/withdrawals and let the daily snapshot build real history to enable this.</div>`;
-        $("dd-chart").innerHTML = '<div class="muted" style="padding:24px">Drawdown needs a reliable NAV-index series.</div>';
-      } else if (snaps.length) {
-        navChart(snaps);
-        ddChart(snaps, risk.thresholds || {});
+      if (snaps.length) {
+        valueChart(snaps);
+        drawdownChart(snaps);
       } else {
-        $("nav-chart").innerHTML = '<div class="muted" style="padding:24px">No NAV snapshots yet. Add one on the NAV ledger page.</div>';
+        $("nav-chart").innerHTML = '<div class="muted" style="padding:24px">No history yet — import transactions and let pricing/daily snapshots build it.</div>';
         $("dd-chart").innerHTML = '<div class="muted" style="padding:24px">No drawdown data yet.</div>';
       }
     } catch (e) {

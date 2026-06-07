@@ -71,6 +71,7 @@ def nav_snapshot_to_dict(n: NavSnapshot) -> dict[str, Any]:
         "id": n.id,
         "as_of": n.as_of.isoformat() if n.as_of else None,
         "gross_asset_value": _f(n.gross_asset_value),
+        "cost_basis": _f(n.cost_basis),
         "loan_balance": _f(n.loan_balance),
         "net_contribution": _f(n.net_contribution),
         "equity": _f(n.equity),

@@ -257,6 +257,7 @@ class NavSnapshot(Base):
     as_of: Mapped[dt.date] = mapped_column(Date, unique=True, index=True)
 
     gross_asset_value: Mapped[float] = mapped_column(MONEY)          # total holdings MV
+    cost_basis: Mapped[float | None] = mapped_column(MONEY, default=None)  # what was paid (P&L = gross - cost)
     loan_balance: Mapped[float] = mapped_column(MONEY, default=0)    # värdepapperskredit
     net_contribution: Mapped[float] = mapped_column(MONEY, default=0)  # cash in (+) / out (-) this period
     equity: Mapped[float] = mapped_column(MONEY)                     # gross - loan

@@ -118,12 +118,14 @@ def reconstruct_series(
     for day in point_dates:
         positions = aggregate(t for t in txns if t.date <= day)
         securities = _ZERO
+        cost = _ZERO
         for isin, p in positions.items():
             fx = fx_to_sek(cfg, p["currency"])
             px = price_on(symbol_by_isin.get(isin), day)
             if px is None:
                 px = _dec(p["avg_price"])  # no close -> value at cost (no fake P&L)
             securities += _dec(p["qty"]) * px * fx
+            cost += _dec(p["cost_sek"])  # SEK paid for the position (as of `day`)
 
         cash = account_cash(session, through=day)
         loan = max(_ZERO, -cash)
@@ -142,6 +144,7 @@ def reconstruct_series(
             "id": None,
             "as_of": day.isoformat(),
             "gross_asset_value": float(gross),
+            "cost_basis": float(cost),
             "loan_balance": float(loan),
             "net_contribution": float(contribution),
             "equity": float(equity),
@@ -182,6 +185,7 @@ def backfill_snapshots(
         session.add(NavSnapshot(
             as_of=dt.date.fromisoformat(r["as_of"]),
             gross_asset_value=_dec(r["gross_asset_value"]),
+            cost_basis=_dec(r["cost_basis"]),
             loan_balance=_dec(r["loan_balance"]),
             net_contribution=_dec(r["net_contribution"]),
             equity=_dec(r["equity"]),

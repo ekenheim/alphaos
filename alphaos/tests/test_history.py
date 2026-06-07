@@ -78,6 +78,11 @@ def test_reconstructs_daily_series_with_price_gain(session):
     assert rows[1]["nav_index"] == pytest.approx(1.10)
     assert rows[1]["drawdown"] == pytest.approx(0.0)
     assert rows[1]["equity"] == pytest.approx(110_000.0)
+    # Value vs cost: paid 100k; worth 100k day 1 (flat) then 110k day 2 (+10k P&L).
+    assert rows[0]["cost_basis"] == pytest.approx(100_000.0)
+    assert rows[0]["gross_asset_value"] - rows[0]["cost_basis"] == pytest.approx(0.0)
+    assert rows[1]["cost_basis"] == pytest.approx(100_000.0)
+    assert rows[1]["gross_asset_value"] - rows[1]["cost_basis"] == pytest.approx(10_000.0)
 
 
 def test_drawdown_when_price_falls_back(session):

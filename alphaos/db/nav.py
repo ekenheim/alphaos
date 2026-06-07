@@ -163,6 +163,7 @@ def add_snapshot(
     snap = NavSnapshot(
         as_of=when,
         gross_asset_value=gross,
+        cost_basis=portfolio_pnl(session)["cost_basis"],
         loan_balance=loan,
         net_contribution=contrib,
         equity=equity,
