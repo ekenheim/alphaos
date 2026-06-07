@@ -259,6 +259,38 @@ def total_gross_value(session: Session) -> Decimal:
     return sum((holding_valuation(cfg, h)["market_value"] for h in list_holdings(session)), _ZERO)
 
 
+def portfolio_pnl(session: Session) -> dict[str, Any]:
+    """Money-terms P&L: total market value vs cost basis across all holdings.
+
+    This is the intuitive 'am I up or down' figure — it needs no contribution
+    history or return index, just current price vs what was paid. `at_cost` counts
+    holdings with no live price (valued at cost, so contributing zero P&L), which
+    flags how much of the book the figure can actually see.
+    """
+    cfg = get_config(session)
+    market_value = _ZERO
+    cost_basis = _ZERO
+    priced = 0
+    at_cost = 0
+    for h in list_holdings(session):
+        v = holding_valuation(cfg, h)
+        market_value += v["market_value"]
+        cost_basis += v["cost_basis"]
+        if v["price_source"] == "cost":
+            at_cost += 1
+        else:
+            priced += 1
+    pnl = market_value - cost_basis
+    return {
+        "market_value": market_value,
+        "cost_basis": cost_basis,
+        "unrealized_pnl": pnl,
+        "return_pct": (pnl / cost_basis) if cost_basis > _ZERO else None,
+        "priced": priced,
+        "at_cost": at_cost,
+    }
+
+
 def allocation(session: Session) -> dict[str, Any]:
     """Target vs current allocation per sleeve, with drift and rebalance deltas.
 

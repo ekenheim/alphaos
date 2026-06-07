@@ -19,7 +19,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .allocation import total_gross_value
+from .allocation import portfolio_pnl, total_gross_value
 from .cash_flows import net_flow_between
 from .config import get_config, target_leverage
 from .models import DeleverStatus, NavSnapshot
@@ -213,6 +213,22 @@ def _f(v: Any) -> float | None:
     return float(v) if v is not None else None
 
 
+def _nav_index_reliability(
+    session: Session, pnl: dict[str, Any], persisted_count: int, today: dt.date
+) -> tuple[bool, str | None]:
+    """The time-weighted NAV index is only trustworthy when contributions are
+    fully recorded and there is real forward history. Flag (and explain) when not,
+    so the dashboard shows '—' instead of a misleading number."""
+    reasons: list[str] = []
+    if persisted_count < 2:
+        reasons.append("history reconstructed from a short price window")
+    recorded = net_flow_between(session, dt.date.min, today)  # total deposits/withdrawals
+    cost = pnl["cost_basis"]
+    if cost > _ZERO and abs(recorded) < cost * Decimal("0.5"):
+        reasons.append("deposit history looks incomplete")
+    return (not reasons), ("; ".join(reasons) or None)
+
+
 def current_risk(session: Session) -> dict[str, Any]:
     """Assemble the live risk picture for the dashboard: NAV/drawdown, de-lever
     distances, leverage vs glide target, belaningsgrad headroom, planning case.
@@ -249,11 +265,31 @@ def current_risk(session: Session) -> dict[str, Any]:
         "account_label": cfg.account_label,
         "base_currency": cfg.base_currency,
         "action": "no NAV snapshots yet",
+        "pnl": None,
+        "nav_index_reliable": False,
+        "nav_index_note": None,
     }
+
+    # Money-terms P&L (works with no snapshots) + whether the time-weighted index
+    # can be trusted; both are returned even in the empty-state below.
+    today = dt.date.today()
+    pnl = portfolio_pnl(session)
+    nav_reliable, nav_note = _nav_index_reliability(
+        session, pnl, len(list_snapshots(session)), today
+    )
+    base["pnl"] = {
+        "market_value": _f(pnl["market_value"]),
+        "cost_basis": _f(pnl["cost_basis"]),
+        "unrealized_pnl": _f(pnl["unrealized_pnl"]),
+        "return_pct": _f(pnl["return_pct"]),
+        "priced": pnl["priced"],
+        "at_cost": pnl["at_cost"],
+    }
+    base["nav_index_reliable"] = nav_reliable
+    base["nav_index_note"] = nav_note
 
     # Live reading: derive gross/loan/equity as-of today and run the shared period
     # math against the latest snapshot strictly before today (no persistence).
-    today = dt.date.today()
     gross, loan = _derive_gross_loan(session, today, None, None)
     prev = latest_snapshot(session, before=today)
     equity = gross - loan

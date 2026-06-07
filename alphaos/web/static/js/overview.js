@@ -19,19 +19,46 @@
     };
     $("account-label").textContent = `${cfg.acct} · ${cfg.ccy}`;
 
-    $("t-nav").textContent = A.fmtNum(risk.nav_index, 3);
+    // Money-terms P&L headline — the intuitive "am I up or down vs what I paid".
+    const pnl = risk.pnl || {};
+    const pnlEl = $("t-pnl");
+    if (pnl.unrealized_pnl != null) {
+      pnlEl.textContent = A.fmtSEKSigned(pnl.unrealized_pnl);
+      setColored(pnlEl, pnl.unrealized_pnl);
+      const pct = pnl.return_pct != null ? A.fmtPct(pnl.return_pct, 2) : "—";
+      const atCost = pnl.at_cost ? ` · ${pnl.at_cost} at cost` : "";
+      $("t-pnl-foot").textContent = `${pct} vs cost${atCost}`;
+    } else {
+      pnlEl.textContent = "—";
+      pnlEl.classList.remove("pos", "neg");
+      $("t-pnl-foot").textContent = "no holdings";
+    }
 
-    const twr = $("t-twr");
-    twr.textContent = A.fmtPct(risk.twr_period, 2);
-    setColored(twr, risk.twr_period);
-
-    const dd = $("t-dd");
-    dd.textContent = A.fmtPct(risk.drawdown, 1);
-    setColored(dd, risk.drawdown);
+    // NAV index / TWR / drawdown — gated when the time-weighted index can't be
+    // trusted (incomplete contributions or too little real history), so it never
+    // shows a misleading number. The reason is surfaced in the foot.
     const th = risk.thresholds || {};
-    $("t-dd-foot").textContent = risk.headroom_to_half != null
-      ? `headroom to −35%: ${A.fmtPct(Math.abs(Math.min(risk.headroom_to_half, 0)), 1)}`
-      : "off NAV-index peak";
+    const twr = $("t-twr");
+    const dd = $("t-dd");
+    if (risk.nav_index_reliable === false) {
+      $("t-nav").textContent = "—";
+      $("t-nav-foot").textContent = risk.nav_index_note || "insufficient data";
+      twr.textContent = "—";
+      twr.classList.remove("pos", "neg");
+      dd.textContent = "—";
+      dd.classList.remove("pos", "neg");
+      $("t-dd-foot").textContent = "needs complete contributions";
+    } else {
+      $("t-nav").textContent = A.fmtNum(risk.nav_index, 3);
+      $("t-nav-foot").textContent = "base 1.000";
+      twr.textContent = A.fmtPct(risk.twr_period, 2);
+      setColored(twr, risk.twr_period);
+      dd.textContent = A.fmtPct(risk.drawdown, 1);
+      setColored(dd, risk.drawdown);
+      $("t-dd-foot").textContent = risk.headroom_to_half != null
+        ? `headroom to −35%: ${A.fmtPct(Math.abs(Math.min(risk.headroom_to_half, 0)), 1)}`
+        : "off NAV-index peak";
+    }
 
     const lev = $("t-lev");
     lev.textContent = risk.effective_leverage != null ? A.fmtNum(risk.effective_leverage, 2) + "×" : "—";
@@ -130,7 +157,11 @@
       const snaps = navData.snapshots || [];
       renderTiles(risk);
       renderStatus(risk);
-      if (snaps.length) {
+      if (risk.nav_index_reliable === false) {
+        const why = risk.nav_index_note || "insufficient data";
+        $("nav-chart").innerHTML = `<div class="muted" style="padding:24px">NAV-index history isn't reliable yet — ${why}. Track money-terms P&amp;L above; record all deposits/withdrawals and let the daily snapshot build real history to enable this.</div>`;
+        $("dd-chart").innerHTML = '<div class="muted" style="padding:24px">Drawdown needs a reliable NAV-index series.</div>';
+      } else if (snaps.length) {
         navChart(snaps);
         ddChart(snaps, risk.thresholds || {});
       } else {
