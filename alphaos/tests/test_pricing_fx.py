@@ -112,6 +112,7 @@ def test_refresh_prices_without_credentials(session, monkeypatch):
     # Ensure no MinIO credentials are visible to have_credentials().
     monkeypatch.delenv("MINIO_SECRET_ACCESS_KEY", raising=False)
     monkeypatch.delenv("MINIO_PASSWORD", raising=False)
+    monkeypatch.setattr(pricing_mod, "have_yfinance", lambda: False)  # no fallback either
     assert pricing_mod.have_credentials() is False
 
     upsert_holding(session, symbol="AAPL", currency="USD", quantity=Decimal("10"))
@@ -119,6 +120,27 @@ def test_refresh_prices_without_credentials(session, monkeypatch):
     res = pricing_mod.refresh_prices(session)  # must not raise
     assert res["ok"] is False
     assert res["updated"] == 0
+
+
+def test_refresh_prices_yfinance_fallback(session, monkeypatch):
+    # No MinIO; yfinance available and resolves the holding -> priced via Yahoo.
+    monkeypatch.setattr(pricing_mod, "have_credentials", lambda: False)
+    monkeypatch.setattr(pricing_mod, "have_yfinance", lambda: True)
+    monkeypatch.setattr(
+        pricing_mod, "yahoo_fallback",
+        lambda symbol, isin: (Decimal("123.45"), "EUR", "CNDX.L"),
+    )
+    h = upsert_holding(
+        session, symbol="CNDX", isin="IE00B53SZB19", currency="SEK", quantity=Decimal("10"),
+    )
+
+    res = pricing_mod.refresh_prices(session)
+    assert res["ok"] is True
+    assert res["updated_yfinance"] == 1
+    assert res["updated"] == 1
+    assert h.last_price == Decimal("123.45")
+    assert h.price_source == PriceSource.yfinance
+    assert h.currency == "EUR"  # currency synced to the quoted price's currency
 
 
 # --------------------------------------------------------------------------- #

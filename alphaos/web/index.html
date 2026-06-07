@@ -8,6 +8,26 @@
   <script src="https://cdn.plot.ly/plotly-2.30.1.min.js" defer></script>
   <script src="/static/js/common.js" defer></script>
   <script src="/static/js/overview.js" defer></script>
+  <style>
+    /* Money calendar (GitHub-style daily-P&L heatmap) */
+    .heatmap-wrap { overflow-x: auto; padding: 4px 2px 8px; }
+    .heatmap { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 12px);
+      grid-auto-columns: 12px; gap: 3px; width: max-content; }
+    .hm-cell { width: 12px; height: 12px; border-radius: 2px; background: #1b1f24; cursor: pointer; }
+    .hm-cell:hover { outline: 1px solid #4dd0e1; }
+    /* Selected-day holdings panel under the calendar */
+    .feed-pos { color: #3fb950; }
+    .feed-neg { color: #f85149; }
+    .feed-ev { color: #d29922; font-size: 12px; }
+    .cal-holdings { margin-top: 8px; }
+    .cal-h-head { padding: 6px 8px; color: #c9d1d9; font-size: 13px;
+      border-top: 1px solid #1f2733; font-variant-numeric: tabular-nums; }
+    .cal-holdings table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .cal-holdings td, .cal-holdings th { padding: 3px 8px; text-align: right; color: #c9d1d9;
+      font-variant-numeric: tabular-nums; }
+    .cal-holdings th { color: #8b949e; font-weight: 500; }
+    .cal-holdings td:first-child, .cal-holdings th:first-child { text-align: left; }
+  </style>
 </head>
 <body>
   <header class="topbar">
@@ -48,6 +68,7 @@
 
     <!-- Risk strip -->
     <section class="kpi-grid kpi-risk">
+      <div class="kpi"><div class="kpi-label">P&amp;L (VS COST)</div><div class="kpi-value" id="t-pnl">—</div><div class="kpi-foot" id="t-pnl-foot">market value vs cost basis</div></div>
       <div class="kpi"><div class="kpi-label">NAV INDEX</div><div class="kpi-value" id="t-nav">—</div><div class="kpi-foot" id="t-nav-foot">base 1.000</div></div>
       <div class="kpi"><div class="kpi-label">PERIOD TWR</div><div class="kpi-value" id="t-twr">—</div><div class="kpi-foot">latest snapshot</div></div>
       <div class="kpi"><div class="kpi-label">DRAWDOWN</div><div class="kpi-value" id="t-dd">—</div><div class="kpi-foot" id="t-dd-foot">off NAV-index peak</div></div>
@@ -59,28 +80,37 @@
       <div class="kpi"><div class="kpi-label">PLANNING CAGR</div><div class="kpi-value" id="t-cagr">—</div><div class="kpi-foot">low – high case</div></div>
     </section>
 
-    <!-- NAV index curve -->
+    <!-- Money calendar: GitHub-style daily P&L heatmap -->
     <section class="card">
       <div class="card-header">
-        <h2>NAV index</h2>
-        <div class="card-sub">Time-weighted equity index (ex-contributions)</div>
+        <h2>Money calendar</h2>
+        <div class="card-sub">Daily P&amp;L on the sleeve book · green up · red down · click a day</div>
+        <div class="card-actions"><span class="pill" id="cal-sum">—</span></div>
+      </div>
+      <div id="cal-heatmap" class="heatmap-wrap"></div>
+      <div id="cal-holdings" class="cal-holdings"></div>
+    </section>
+
+    <!-- Account value vs cost -->
+    <section class="card">
+      <div class="card-header">
+        <h2>Account value vs cost</h2>
+        <div class="card-sub">Market value vs cost basis · the gap is your unrealized P&amp;L (SEK)</div>
         <div class="card-actions">
-          <span class="pill" id="nav-last">Last —</span>
-          <span class="pill" id="nav-peak">Peak —</span>
+          <span class="pill" id="nav-last">Value —</span>
+          <span class="pill" id="nav-peak">P&amp;L —</span>
         </div>
       </div>
       <div id="nav-chart" class="chart-tall"></div>
     </section>
 
-    <!-- Drawdown area with thresholds -->
+    <!-- Drawdown off account high -->
     <section class="card">
       <div class="card-header">
         <h2>Drawdown</h2>
-        <div class="card-sub">Off NAV-index peak · thresholds at −35% / −45% / −57%</div>
+        <div class="card-sub">How far below your account's peak value</div>
         <div class="card-actions">
-          <span class="pill" id="dd-half">half −35%</span>
-          <span class="pill" id="dd-full">full −45%</span>
-          <span class="pill pill-neg" id="dd-forced">forced −57%</span>
+          <span class="pill pill-neg" id="dd-max">max —</span>
         </div>
       </div>
       <div id="dd-chart" class="chart-tall"></div>

@@ -14,6 +14,9 @@ Endpoints:
   GET  /api/nav            NAV snapshots + current risk
   POST /api/nav            add a NAV snapshot
   POST /api/nav/snapshot-now  upsert a derived snapshot for today (idempotent)
+  POST /api/nav/backfill   reconstruct + persist the daily NAV series from history
+  GET  /api/nav/journal    daily money journal (value/cost/day-P&L/events)
+  GET  /api/nav/holdings-on?date=  holdings held on a date, with valuation
   GET  /api/cashflows      list cash flows (deposits/withdrawals)
   POST /api/cashflows      add a cash flow
   DELETE /api/cashflows/{id} delete a cash flow
@@ -39,6 +42,7 @@ from .db import session_scope, have_database, db_status
 from .db import config as dbconfig
 from .db import allocation as dballoc
 from .db import nav as dbnav
+from .db import history as dbhistory
 from .db import fx as dbfx, pricing as dbpricing, importer as dbimporter
 from .db import transactions as dbtx
 from .db import cash_flows as dbcf
@@ -207,8 +211,18 @@ def get_nav() -> JSONResponse:
     with session_scope() as session:
         snapshots = dbnav.list_snapshots(session)
         risk = dbnav.current_risk(session)
+        rows = [nav_snapshot_to_dict(n) for n in snapshots]
+        # Until the daily job has accumulated history, reconstruct the past from
+        # the transaction ledger + historical closes so the chart has a curve.
+        reconstructed = False
+        if len(rows) < 2:
+            series = dbhistory.reconstruct_series(session)
+            if len(series) >= 2:
+                rows = series
+                reconstructed = True
         return JSONResponse({
-            "snapshots": [nav_snapshot_to_dict(n) for n in snapshots],
+            "snapshots": rows,
+            "reconstructed": reconstructed,
             "risk": jsonable(risk),
         })
 
@@ -251,6 +265,51 @@ async def post_snapshot_now(request: Request) -> JSONResponse:
             )
             payload = {"snapshot": nav_snapshot_to_dict(snap)}
         return JSONResponse(payload)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.post("/api/nav/backfill")
+async def post_nav_backfill(request: Request) -> JSONResponse:
+    """Reconstruct and PERSIST the daily NAV series from the transaction ledger +
+    historical closes, replacing any snapshots in the covered range."""
+    if not have_database():
+        return _DB_UNCONFIGURED
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        with session_scope() as session:
+            written = dbhistory.backfill_snapshots(
+                session, start=body.get("start"), end=body.get("end")
+            )
+        return JSONResponse({"written": written})
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.get("/api/nav/journal")
+def get_nav_journal(days: int = 365, sleeve_only: bool = True) -> JSONResponse:
+    """Daily money journal (value/cost/day-P&L/events) for the heatmap + feed."""
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        return JSONResponse({
+            "journal": dbhistory.daily_journal(session, days=days, sleeve_only=sleeve_only),
+            "sleeve_only": sleeve_only,
+        })
+
+
+@app.get("/api/nav/holdings-on")
+def get_holdings_on(date: str, sleeve_only: bool = True) -> JSONResponse:
+    """What was held on a given calendar date, with per-position valuation."""
+    if not have_database():
+        return _DB_UNCONFIGURED
+    try:
+        with session_scope() as session:
+            rows = dbhistory.holdings_on(session, date, sleeve_only=sleeve_only)
+        return JSONResponse({"date": date, "holdings": rows})
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 
