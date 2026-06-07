@@ -167,10 +167,26 @@
     }
   }
 
+  async function onRebuildHistory() {
+    const msg = $("form-msg");
+    msg.className = "form-msg";
+    msg.textContent = "rebuilding daily history…";
+    try {
+      const res = await A.postJSON("/api/nav/backfill", {});
+      msg.className = "form-msg ok";
+      msg.textContent = `history rebuilt — ${res.written ?? 0} daily snapshots ✓`;
+      await load();
+    } catch (e) {
+      msg.className = "form-msg err";
+      msg.textContent = A.isDbError(e) ? "database not configured" : e.message;
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     load();
     $("nav-form").addEventListener("submit", onSubmit);
     $("snap-now").addEventListener("click", onSnapNow);
+    $("rebuild-history").addEventListener("click", onRebuildHistory);
     $("f-cf-date").value = new Date().toISOString().slice(0, 10);
     $("cf-form").addEventListener("submit", onCFSubmit);
   });
