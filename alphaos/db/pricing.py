@@ -95,6 +95,52 @@ def latest_closes(symbols: list[str], tf: str = "1day") -> dict[str, tuple[Decim
     return out
 
 
+def closes_in_range(
+    symbols: list[str], start: date, end: date, tf: str = "1day"
+) -> dict[date, dict[str, Decimal]]:
+    """Return {date: {TICKER: close}} for every daily partition in [start, end].
+
+    Used to reconstruct a historical NAV series — values holdings at each day's
+    close rather than only the latest one. Empty if MinIO is unreachable/unconfigured.
+    """
+    wanted = {s.strip().upper() for s in symbols if s and s.strip()}
+    if not wanted or not have_credentials():
+        return {}
+    import pandas as pd
+
+    s3 = _client()
+    prefix = f"bars/tf={tf}/"
+    paginator = s3.get_paginator("list_objects_v2")
+    keys_by_date: dict[date, list[str]] = {}
+    for page in paginator.paginate(Bucket=_BUCKET, Prefix=prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if not key.endswith(".parquet"):
+                continue
+            try:
+                d = date.fromisoformat(key.split("date=", 1)[1].split("/", 1)[0])
+            except (IndexError, ValueError):
+                continue
+            if start <= d <= end:
+                keys_by_date.setdefault(d, []).append(key)
+
+    out: dict[date, dict[str, Decimal]] = {}
+    for d, keys in keys_by_date.items():
+        day: dict[str, Decimal] = {}
+        for key in keys:
+            obj = s3.get_object(Bucket=_BUCKET, Key=key)
+            df = pd.read_parquet(io.BytesIO(obj["Body"].read()))
+            if "ticker" not in df.columns or "close" not in df.columns:
+                continue
+            tick = df["ticker"].astype(str).str.upper()
+            sub = df[tick.isin(wanted)]
+            for _, r in sub.iterrows():
+                day[str(r["ticker"]).upper()] = Decimal(str(r["close"]))
+        if day:
+            out[d] = day
+    return out
+
+
 def refresh_prices(session: Session, tf: str = "1day") -> dict[str, Any]:
     """Update last_price/last_price_date for holdings whose symbol is in stocks-us.
 
