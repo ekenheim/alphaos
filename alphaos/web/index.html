@@ -8,6 +8,32 @@
   <script src="https://cdn.plot.ly/plotly-2.30.1.min.js" defer></script>
   <script src="/static/js/common.js" defer></script>
   <script src="/static/js/overview.js" defer></script>
+  <style>
+    /* Money calendar (GitHub-style daily-P&L heatmap) */
+    .heatmap-wrap { overflow-x: auto; padding: 4px 2px 8px; }
+    .heatmap { display: grid; grid-auto-flow: column; grid-template-rows: repeat(7, 12px);
+      grid-auto-columns: 12px; gap: 3px; width: max-content; }
+    .hm-cell { width: 12px; height: 12px; border-radius: 2px; background: #1b1f24; cursor: pointer; }
+    .hm-cell:hover { outline: 1px solid #4dd0e1; }
+    /* Money feed */
+    .feed { max-height: 460px; overflow-y: auto; }
+    .feed-row { display: flex; align-items: center; gap: 12px; padding: 7px 8px;
+      border-bottom: 1px solid #1f2733; cursor: pointer; font-variant-numeric: tabular-nums; }
+    .feed-row:hover { background: #161b22; }
+    .feed-date { width: 54px; color: #8b949e; font-size: 13px; }
+    .feed-pnl { width: 120px; font-weight: 600; }
+    .feed-val { width: 110px; color: #c9d1d9; }
+    .feed-pct { width: 64px; font-size: 12px; }
+    .feed-ev { color: #d29922; font-size: 12px; }
+    .feed-pos { color: #3fb950; }
+    .feed-neg { color: #f85149; }
+    .feed-holdings { padding: 8px 8px 12px 74px; background: #0d1117; border-bottom: 1px solid #1f2733; }
+    .feed-holdings table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .feed-holdings td, .feed-holdings th { padding: 3px 8px; text-align: right; color: #c9d1d9;
+      font-variant-numeric: tabular-nums; }
+    .feed-holdings th { color: #8b949e; font-weight: 500; }
+    .feed-holdings td:first-child, .feed-holdings th:first-child { text-align: left; }
+  </style>
 </head>
 <body>
   <header class="topbar">
@@ -58,6 +84,25 @@
       <div class="kpi"><div class="kpi-label">LOAN</div><div class="kpi-value" id="t-loan">—</div><div class="kpi-foot" id="t-gross-foot">gross —</div></div>
       <div class="kpi"><div class="kpi-label">EXTERNAL RESERVE</div><div class="kpi-value" id="t-reserve">—</div><div class="kpi-foot">off-book buffer</div></div>
       <div class="kpi"><div class="kpi-label">PLANNING CAGR</div><div class="kpi-value" id="t-cagr">—</div><div class="kpi-foot">low – high case</div></div>
+    </section>
+
+    <!-- Money calendar: GitHub-style daily P&L heatmap -->
+    <section class="card">
+      <div class="card-header">
+        <h2>Money calendar</h2>
+        <div class="card-sub">Daily P&amp;L on the sleeve book · green up · red down · click a day</div>
+        <div class="card-actions"><span class="pill" id="cal-sum">—</span></div>
+      </div>
+      <div id="cal-heatmap" class="heatmap-wrap"></div>
+    </section>
+
+    <!-- Money feed: per-day, click to expand holdings -->
+    <section class="card">
+      <div class="card-header">
+        <h2>Money feed</h2>
+        <div class="card-sub">Day by day, newest first · click a day to see what was held</div>
+      </div>
+      <div id="money-feed" class="feed"></div>
     </section>
 
     <!-- Account value vs cost -->

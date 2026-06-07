@@ -259,13 +259,14 @@ def total_gross_value(session: Session) -> Decimal:
     return sum((holding_valuation(cfg, h)["market_value"] for h in list_holdings(session)), _ZERO)
 
 
-def portfolio_pnl(session: Session) -> dict[str, Any]:
-    """Money-terms P&L: total market value vs cost basis across all holdings.
+def portfolio_pnl(session: Session, *, sleeve_only: bool = False) -> dict[str, Any]:
+    """Money-terms P&L: total market value vs cost basis across holdings.
 
     This is the intuitive 'am I up or down' figure — it needs no contribution
     history or return index, just current price vs what was paid. `at_cost` counts
     holdings with no live price (valued at cost, so contributing zero P&L), which
-    flags how much of the book the figure can actually see.
+    flags how much of the book the figure can actually see. With sleeve_only=True,
+    only holdings assigned to a sleeve count (the actual strategy book).
     """
     cfg = get_config(session)
     market_value = _ZERO
@@ -273,6 +274,8 @@ def portfolio_pnl(session: Session) -> dict[str, Any]:
     priced = 0
     at_cost = 0
     for h in list_holdings(session):
+        if sleeve_only and h.sleeve_id is None:
+            continue
         v = holding_valuation(cfg, h)
         market_value += v["market_value"]
         cost_basis += v["cost_basis"]

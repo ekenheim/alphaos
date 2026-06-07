@@ -26,7 +26,7 @@ from .allocation import list_holdings
 from .cash_flows import net_flow_between
 from .config import get_config
 from .fx import fx_to_sek
-from .models import DeleverStatus, NavSnapshot
+from .models import DeleverStatus, NavSnapshot, TransactionKind
 from .nav import _compute_period_metrics
 from .reconcile import account_cash
 from .transactions import aggregate, list_transactions
@@ -200,3 +200,156 @@ def backfill_snapshots(
         ))
     session.flush()
     return len(rows)
+
+
+def _price_lookup(closes: dict[dt.date, dict[str, Decimal]]):
+    """Forward-filled close lookup: most recent close on/before a given day."""
+    series: dict[str, list[tuple[dt.date, Decimal]]] = {}
+    for d in sorted(closes):
+        for sym, px in closes[d].items():
+            series.setdefault(sym, []).append((d, _dec(px)))
+
+    def price_on(sym: str | None, day: dt.date) -> Decimal | None:
+        ser = series.get(sym or "")
+        if not ser:
+            return None
+        chosen: Decimal | None = None
+        for d, px in ser:
+            if d <= day:
+                chosen = px
+            else:
+                break
+        return chosen
+
+    return price_on
+
+
+def _sleeve_isins(holdings) -> set[str]:
+    return {(h.isin or "").upper() for h in holdings if h.sleeve_id is not None and h.isin}
+
+
+def daily_journal(
+    session: Session,
+    *,
+    days: int = 365,
+    end: dt.date | str | None = None,
+    sleeve_only: bool = True,
+    closes: dict[dt.date, dict[str, Decimal]] | None = None,
+) -> list[dict[str, Any]]:
+    """One row per CALENDAR day over the trailing `days` window (capped at the
+    first transaction): value, cost basis, cumulative P&L (value - cost), the
+    day's P&L change, and any buy/sell event that day. Powers the contribution
+    heatmap and the money feed. sleeve_only restricts to sleeve-assigned holdings.
+    """
+    cfg = get_config(session)
+    txns = list_transactions(session)
+    if not txns:
+        return []
+    end = _as_date(end) if end else dt.date.today()
+    start = max(min(t.date for t in txns), end - dt.timedelta(days=days - 1))
+    if end < start:
+        return []
+
+    holdings = list_holdings(session)
+    symbol_by_isin = _symbol_map(holdings, txns)
+    keep = _sleeve_isins(holdings)
+    symbols = sorted(set(symbol_by_isin.values()))
+    if closes is None:
+        closes = pricing.closes_in_range(symbols, start - dt.timedelta(days=10), end)
+    price_on = _price_lookup(closes)
+
+    by_day: dict[dt.date, list[Any]] = {}
+    for t in txns:
+        by_day.setdefault(t.date, []).append(t)
+
+    rows: list[dict[str, Any]] = []
+    prev_pnl: Decimal | None = None
+    day = start
+    one = dt.timedelta(days=1)
+    while day <= end:
+        positions = aggregate(t for t in txns if t.date <= day)
+        value = _ZERO
+        cost = _ZERO
+        for isin, p in positions.items():
+            if sleeve_only and isin.upper() not in keep:
+                continue
+            fx = fx_to_sek(cfg, p["currency"])
+            px = price_on(symbol_by_isin.get(isin), day)
+            if px is None:
+                px = _dec(p["avg_price"])
+            value += _dec(p["qty"]) * px * fx
+            cost += _dec(p["cost_sek"])
+        pnl = value - cost
+        day_pnl = (pnl - prev_pnl) if prev_pnl is not None else _ZERO
+        evs = by_day.get(day) or []
+        if sleeve_only:
+            evs = [t for t in evs if (t.isin or "").upper() in keep]
+        event = None
+        if evs:
+            buys = sorted({(t.symbol or t.isin) for t in evs if t.kind is TransactionKind.buy})
+            sells = sorted({(t.symbol or t.isin) for t in evs if t.kind is TransactionKind.sell})
+            parts = [f"+{s}" for s in buys] + [f"−{s}" for s in sells]
+            event = " ".join(parts) or None
+        rows.append({
+            "date": day.isoformat(),
+            "value": float(value),
+            "cost_basis": float(cost),
+            "pnl": float(pnl),
+            "day_pnl": float(day_pnl),
+            "has_event": bool(evs),
+            "event": event,
+        })
+        prev_pnl = pnl
+        day += one
+    return rows
+
+
+def holdings_on(
+    session: Session,
+    on: dt.date | str,
+    *,
+    sleeve_only: bool = True,
+    closes: dict[dt.date, dict[str, Decimal]] | None = None,
+) -> list[dict[str, Any]]:
+    """What was held as of `on` (derived from transactions) with each position's
+    quantity, price that day, SEK value, and cost basis. Drives the feed's
+    per-day expand. sleeve_only restricts to sleeve-assigned holdings."""
+    cfg = get_config(session)
+    when = _as_date(on)
+    txns = [t for t in list_transactions(session) if t.date <= when]
+    if not txns:
+        return []
+    holdings = list_holdings(session)
+    symbol_by_isin = _symbol_map(holdings, txns)
+    keep = _sleeve_isins(holdings)
+    name_by_isin = {(h.isin or "").upper(): h.name for h in holdings if h.isin}
+    symbols = sorted(set(symbol_by_isin.values()))
+    if closes is None:
+        closes = pricing.closes_in_range(symbols, when - dt.timedelta(days=10), when)
+    price_on = _price_lookup(closes)
+
+    out: list[dict[str, Any]] = []
+    for isin, p in aggregate(txns).items():
+        if sleeve_only and isin.upper() not in keep:
+            continue
+        fx = fx_to_sek(cfg, p["currency"])
+        px = price_on(symbol_by_isin.get(isin), when)
+        priced = px is not None
+        if not priced:
+            px = _dec(p["avg_price"])
+        value = _dec(p["qty"]) * px * fx
+        cost = _dec(p["cost_sek"])
+        out.append({
+            "isin": isin,
+            "symbol": symbol_by_isin.get(isin),
+            "name": name_by_isin.get(isin.upper()) or p.get("name"),
+            "currency": p["currency"],
+            "quantity": float(_dec(p["qty"])),
+            "price": float(px),
+            "priced": priced,
+            "value": float(value),
+            "cost_basis": float(cost),
+            "pnl": float(value - cost),
+        })
+    out.sort(key=lambda r: r["value"], reverse=True)
+    return out

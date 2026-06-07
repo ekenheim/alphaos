@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from alphaos.db.allocation import portfolio_pnl, upsert_holding
+from alphaos.db.allocation import portfolio_pnl, upsert_holding, upsert_sleeve
 from alphaos.db.cash_flows import add_cash_flow
 from alphaos.db.models import Base, CashFlowKind, PriceSource, Transaction, TransactionKind, TxnSource
 from alphaos.db.nav import current_risk
@@ -56,7 +56,9 @@ def test_pnl_gain_and_source_counts(session):
 
 def test_nav_index_gated_when_contributions_incomplete(session):
     # 100k of holdings but only a 10k deposit recorded -> index not trustworthy.
-    _holding(session, symbol="AAA", isin="SE0000000001", quantity=100,
+    # Sleeve-assigned so it counts toward the (sleeve-only) P&L tile.
+    upsert_sleeve(session, "CORE", name="Core")
+    _holding(session, sleeve_code="CORE", symbol="AAA", isin="SE0000000001", quantity=100,
              avg_price=1000, last_price=1000, price_source=PriceSource.minio)
     session.add(Transaction(
         date=dt.date(2026, 6, 1), isin="SE0000000001", kind=TransactionKind.buy,

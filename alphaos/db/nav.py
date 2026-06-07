@@ -274,7 +274,7 @@ def current_risk(session: Session) -> dict[str, Any]:
     # Money-terms P&L (works with no snapshots) + whether the time-weighted index
     # can be trusted; both are returned even in the empty-state below.
     today = dt.date.today()
-    pnl = portfolio_pnl(session)
+    pnl = portfolio_pnl(session, sleeve_only=True)
     nav_reliable, nav_note = _nav_index_reliability(
         session, pnl, len(list_snapshots(session)), today
     )

@@ -97,25 +97,22 @@
     banner.className = "card status-banner-" + status;
   }
 
-  // Account value vs cost basis. The gap between the lines is unrealized P&L —
-  // deposits/buys raise BOTH lines together, so only market moves change the gap.
-  function valueChart(snaps) {
-    const x = snaps.map((s) => s.as_of);
-    const value = snaps.map((s) => s.gross_asset_value);
-    const cost = snaps.map((s) => s.cost_basis);
-    const last = snaps.length ? snaps[snaps.length - 1] : null;
+  // Account value vs cost basis (sleeve book). The gap between the lines is your
+  // unrealized P&L — deposits/buys raise BOTH lines together, so only market
+  // moves change the gap. `j` is the daily journal (date / value / cost_basis).
+  function valueChart(j) {
+    const x = j.map((r) => r.date);
+    const last = j.length ? j[j.length - 1] : null;
     if (last) {
-      $("nav-last").textContent = "Value " + A.fmtSEK(last.gross_asset_value);
-      const pnl = (last.gross_asset_value != null && last.cost_basis != null)
-        ? last.gross_asset_value - last.cost_basis : null;
-      $("nav-peak").textContent = pnl != null ? "P&L " + A.fmtSEKSigned(pnl) : "P&L —";
+      $("nav-last").textContent = "Value " + A.fmtSEK(last.value);
+      $("nav-peak").textContent = "P&L " + A.fmtSEKSigned(last.pnl);
     }
     const traces = [{
-      x, y: value, type: "scatter", mode: "lines", name: "value",
+      x, y: j.map((r) => r.value), type: "scatter", mode: "lines", name: "value",
       line: { color: "#4dd0e1", width: 2 },
       hovertemplate: "%{x}<br>value %{y:,.0f} kr<extra></extra>",
     }, {
-      x, y: cost, type: "scatter", mode: "lines", name: "cost basis",
+      x, y: j.map((r) => r.cost_basis), type: "scatter", mode: "lines", name: "cost basis",
       line: { color: "#6e7681", width: 1, dash: "dot" },
       hovertemplate: "%{x}<br>cost %{y:,.0f} kr<extra></extra>",
     }];
@@ -125,16 +122,14 @@
   }
 
   // Drawdown off the running peak of account value (no contribution data needed).
-  function drawdownChart(snaps) {
-    const x = snaps.map((s) => s.as_of);
+  function drawdownChart(j) {
+    const x = j.map((r) => r.date);
     let peak = -Infinity;
-    const y = snaps.map((s) => {
-      const v = s.equity != null ? s.equity : s.gross_asset_value;
-      if (v == null) return null;
-      if (v > peak) peak = v;
-      return peak > 0 ? (v / peak - 1) * 100 : 0;
+    const y = j.map((r) => {
+      if (r.value > peak) peak = r.value;
+      return peak > 0 ? (r.value / peak - 1) * 100 : 0;
     });
-    const minDD = Math.min(0, ...y.filter((v) => v != null));
+    const minDD = Math.min(0, ...y);
     $("dd-max").textContent = "max " + minDD.toFixed(1) + "%";
     const trace = {
       x, y, type: "scatter", mode: "lines", name: "drawdown",
@@ -148,20 +143,115 @@
     }), A.plotlyConfig);
   }
 
+  // --- Money calendar (GitHub-style daily-P&L heatmap) ---
+
+  function hmColor(dp, maxAbs) {
+    if (!dp || !maxAbs) return "#1b1f24";
+    const a = 0.18 + 0.82 * Math.min(1, Math.abs(dp) / maxAbs);
+    return dp > 0 ? `rgba(63,185,80,${a})` : `rgba(248,81,73,${a})`;
+  }
+
+  function renderHeatmap(j) {
+    const el = $("cal-heatmap");
+    const byDate = {};
+    let maxAbs = 0, total = 0;
+    j.forEach((r) => { byDate[r.date] = r; maxAbs = Math.max(maxAbs, Math.abs(r.day_pnl)); total += r.day_pnl; });
+    // Monday-align the first day (UTC noon avoids any timezone date-shift).
+    const last = new Date(j[j.length - 1].date + "T12:00:00Z");
+    const start = new Date(j[0].date + "T12:00:00Z");
+    start.setUTCDate(start.getUTCDate() - ((start.getUTCDay() + 6) % 7));
+    const grid = document.createElement("div");
+    grid.className = "heatmap";
+    for (let d = new Date(start); d <= last; d.setUTCDate(d.getUTCDate() + 1)) {
+      const iso = d.toISOString().slice(0, 10);
+      const r = byDate[iso];
+      const cell = document.createElement("div");
+      cell.className = "hm-cell";
+      if (r) {
+        cell.style.background = hmColor(r.day_pnl, maxAbs);
+        cell.title = `${iso}: ${A.fmtSEKSigned(r.day_pnl)} · value ${A.fmtSEK(r.value)}`;
+        cell.dataset.date = iso;
+      } else {
+        cell.title = iso;
+      }
+      grid.appendChild(cell);
+    }
+    el.innerHTML = "";
+    el.appendChild(grid);
+    grid.addEventListener("click", (e) => {
+      const c = e.target.closest(".hm-cell");
+      if (!c || !c.dataset.date) return;
+      const row = document.querySelector(`.feed-row[data-date="${c.dataset.date}"]`);
+      if (row) { row.scrollIntoView({ block: "center" }); toggleHoldings(row); }
+    });
+    $("cal-sum").textContent = "net " + A.fmtSEKSigned(total);
+  }
+
+  // --- Money feed (one row per day; click to expand that day's holdings) ---
+
+  function feedRow(r, prevValue) {
+    const cls = r.day_pnl > 0 ? "feed-pos" : (r.day_pnl < 0 ? "feed-neg" : "");
+    const arrow = r.day_pnl > 0 ? "▲" : (r.day_pnl < 0 ? "▼" : "·");
+    const pct = prevValue > 0 ? A.fmtPct(r.day_pnl / prevValue, 2) : "";
+    const ev = r.event ? `<span class="feed-ev">• ${r.event}</span>` : "";
+    return `<div class="feed-row" data-date="${r.date}">` +
+      `<span class="feed-date">${r.date.slice(5)}</span>` +
+      `<span class="feed-pnl ${cls}">${arrow} ${A.fmtSEKSigned(r.day_pnl)}</span>` +
+      `<span class="feed-val">${A.fmtSEK(r.value)}</span>` +
+      `<span class="feed-pct ${cls}">${pct}</span>${ev}</div>`;
+  }
+
+  function renderFeed(j) {
+    const el = $("money-feed");
+    const out = [];
+    for (let i = j.length - 1; i >= 0; i--) out.push(feedRow(j[i], i > 0 ? j[i - 1].value : 0));
+    el.innerHTML = out.join("");
+    el.querySelectorAll(".feed-row").forEach((row) =>
+      row.addEventListener("click", () => toggleHoldings(row)));
+  }
+
+  async function toggleHoldings(row) {
+    const next = row.nextElementSibling;
+    if (next && next.classList.contains("feed-holdings")) { next.remove(); return; }
+    document.querySelectorAll(".feed-holdings").forEach((n) => n.remove());
+    const box = document.createElement("div");
+    box.className = "feed-holdings";
+    box.textContent = "loading…";
+    row.after(box);
+    try {
+      const hs = (await A.getJSON(`/api/nav/holdings-on?date=${row.dataset.date}`)).holdings || [];
+      if (!hs.length) { box.innerHTML = '<span class="muted">nothing held</span>'; return; }
+      box.innerHTML = "<table><thead><tr><th>Holding</th><th>Qty</th><th>Price</th>" +
+        "<th>Value</th><th>P&amp;L</th></tr></thead><tbody>" +
+        hs.map((h) => `<tr><td>${h.symbol || h.isin}${h.priced ? "" : " <span class='muted'>(cost)</span>"}</td>` +
+          `<td>${A.fmtNum(h.quantity, 2)}</td><td>${A.fmtNum(h.price, 2)}</td>` +
+          `<td>${A.fmtSEK(h.value)}</td>` +
+          `<td class="${h.pnl >= 0 ? "feed-pos" : "feed-neg"}">${A.fmtSEKSigned(h.pnl)}</td></tr>`).join("") +
+        "</tbody></table>";
+    } catch (e) {
+      box.innerHTML = `<span class="feed-neg">${e.message}</span>`;
+    }
+  }
+
   async function load() {
     A.dbChip($("db-chip"));
     try {
-      const navData = await A.getJSON("/api/nav");
-      const risk = navData.risk || {};
-      const snaps = navData.snapshots || [];
+      const risk = (await A.getJSON("/api/nav")).risk || {};
       renderTiles(risk);
       renderStatus(risk);
-      if (snaps.length) {
-        valueChart(snaps);
-        drawdownChart(snaps);
+    } catch (e) {
+      A.showNotice($("notice"), e);
+    }
+    try {
+      const j = (await A.getJSON("/api/nav/journal")).journal || [];
+      if (j.length) {
+        valueChart(j);
+        drawdownChart(j);
+        renderHeatmap(j);
+        renderFeed(j);
       } else {
-        $("nav-chart").innerHTML = '<div class="muted" style="padding:24px">No history yet — import transactions and let pricing/daily snapshots build it.</div>';
-        $("dd-chart").innerHTML = '<div class="muted" style="padding:24px">No drawdown data yet.</div>';
+        const msg = '<div class="muted" style="padding:24px">No history yet — import transactions and assign holdings to sleeves.</div>';
+        ["nav-chart", "dd-chart", "cal-heatmap", "money-feed"].forEach((id) => { $(id).innerHTML = msg; });
       }
     } catch (e) {
       A.showNotice($("notice"), e);

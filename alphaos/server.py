@@ -15,6 +15,8 @@ Endpoints:
   POST /api/nav            add a NAV snapshot
   POST /api/nav/snapshot-now  upsert a derived snapshot for today (idempotent)
   POST /api/nav/backfill   reconstruct + persist the daily NAV series from history
+  GET  /api/nav/journal    daily money journal (value/cost/day-P&L/events)
+  GET  /api/nav/holdings-on?date=  holdings held on a date, with valuation
   GET  /api/cashflows      list cash flows (deposits/withdrawals)
   POST /api/cashflows      add a cash flow
   DELETE /api/cashflows/{id} delete a cash flow
@@ -283,6 +285,31 @@ async def post_nav_backfill(request: Request) -> JSONResponse:
                 session, start=body.get("start"), end=body.get("end")
             )
         return JSONResponse({"written": written})
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.get("/api/nav/journal")
+def get_nav_journal(days: int = 365, sleeve_only: bool = True) -> JSONResponse:
+    """Daily money journal (value/cost/day-P&L/events) for the heatmap + feed."""
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        return JSONResponse({
+            "journal": dbhistory.daily_journal(session, days=days, sleeve_only=sleeve_only),
+            "sleeve_only": sleeve_only,
+        })
+
+
+@app.get("/api/nav/holdings-on")
+def get_holdings_on(date: str, sleeve_only: bool = True) -> JSONResponse:
+    """What was held on a given calendar date, with per-position valuation."""
+    if not have_database():
+        return _DB_UNCONFIGURED
+    try:
+        with session_scope() as session:
+            rows = dbhistory.holdings_on(session, date, sleeve_only=sleeve_only)
+        return JSONResponse({"date": date, "holdings": rows})
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
 
