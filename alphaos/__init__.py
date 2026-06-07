@@ -6,4 +6,4 @@ headroom, and the binding de-lever rule. FastAPI backend (alphaos.server:app) +
 PostgreSQL (alphaos.db).
 """
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"

@@ -70,6 +70,7 @@ class DeleverStatus(str, enum.Enum):
 
 class PriceSource(str, enum.Enum):
     minio = "minio"            # latest close from MinIO stocks-us
+    yfinance = "yfinance"      # last price from Yahoo (fallback for non-US listings)
     manual = "manual"          # current price typed by the operator
     cost = "cost"              # no current price -> valued at purchase price
     none = "none"             # not priced
