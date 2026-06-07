@@ -40,6 +40,7 @@ dev = [
 
 [project.scripts]
 alphaos = "alphaos.cli:main"
+alphaos-daily-snapshot = "alphaos.jobs:main"
 
 [project.urls]
 Documentation = "file://README.md"

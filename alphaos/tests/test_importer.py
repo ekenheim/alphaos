@@ -17,13 +17,22 @@ import pytest
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from alphaos.db.models import Base, Holding, Transaction, TransactionKind, TxnSource
+from alphaos.db.models import (
+    Base,
+    CashFlow,
+    CashFlowKind,
+    Holding,
+    Transaction,
+    TransactionKind,
+    TxnSource,
+)
 from alphaos.db.allocation import (
     get_holding_by_isin,
     list_holdings,
     upsert_holding,
     upsert_sleeve,
 )
+from alphaos.db.cash_flows import add_cash_flow, list_cash_flows
 from alphaos.db.importer import import_transactions, parse_avanza_csv, preview_import
 
 
@@ -221,3 +230,73 @@ def test_preview_reports_summary_and_holdings_without_writing(session):
     # The DB is untouched: row counts are exactly what they were before.
     assert _count(session, Transaction) == before_txns == 0
     assert _count(session, Holding) == before_holdings == 0
+
+
+# --------------------------------------------------------------------------- #
+# cash-flow routing: Insättning -> deposit, Uttag -> withdrawal
+# --------------------------------------------------------------------------- #
+
+# One deposit (+10000), one buy (untouched by the cash-flow routing), and one
+# Uttag whose Belopp is already negative — the parser normalizes by sign anyway.
+_CSV_CF = "\n".join([
+    _HEADER,
+    "2026-01-05;ISK;Insättning;;;;10000,00;SEK;0;1;SEK;;",
+    "2026-02-01;ISK;Köp;Alpha AB;100;50,00;-5000,00;SEK;0;1;SEK;SE0000000001;",
+    "2026-03-01;ISK;Uttag;;;;-2000,00;SEK;0;1;SEK;;",
+])
+
+
+def test_parse_routes_deposit_and_withdrawal_into_cash_flows():
+    res = parse_avanza_csv(_CSV_CF)
+
+    cfs = res["cash_flows"]
+    assert len(cfs) == 2
+    by_kind = {c["kind"]: c for c in cfs}
+    # Insättning -> deposit, signed positive.
+    assert _dec(by_kind["deposit"]["amount_sek"]) == Decimal("10000")
+    # Uttag -> withdrawal, signed negative regardless of the CSV's sign.
+    assert _dec(by_kind["withdrawal"]["amount_sek"]) == Decimal("-2000")
+    # deposits_total stays back-compat (sums deposit magnitudes only).
+    assert _dec(res["deposits_total"]) == Decimal("10000")
+    # The single Köp row is still a transaction, not a cash flow.
+    assert len(res["transactions"]) == 1
+
+
+def test_import_persists_cash_flows_and_leaves_buys_intact(session):
+    res = import_transactions(session, _CSV_CF)
+
+    assert res["cash_flows_imported"] == 2
+    # net flow = +10000 - 2000.
+    assert res["cash_flows_net_sek"] == pytest.approx(8000.0)
+    # The buy is unaffected by cash-flow routing.
+    assert res["transactions_imported"] == 1
+    assert _count(session, Transaction) == 1
+
+    cfs = list_cash_flows(session)
+    assert len(cfs) == 2
+    assert all(c.source is TxnSource.avanza for c in cfs)
+    dep = next(c for c in cfs if c.kind is CashFlowKind.deposit)
+    wd = next(c for c in cfs if c.kind is CashFlowKind.withdrawal)
+    assert _dec(dep.amount_sek) == Decimal("10000")
+    assert _dec(wd.amount_sek) == Decimal("-2000")
+
+
+def test_reimport_cash_flows_is_idempotent_and_preserves_manual(session):
+    import_transactions(session, _CSV_CF)
+
+    # A hand-entered cash flow inside the file's date range must survive.
+    add_cash_flow(session, date="2026-02-10", amount_sek=500, kind="deposit", source="manual")
+
+    # Re-import the SAME file -> avanza rows replaced by range, not appended.
+    second = import_transactions(session, _CSV_CF)
+    assert second["cash_flows_imported"] == 2
+    # Buy/sell ledger stays a single row across the re-import.
+    assert _count(session, Transaction) == 1
+
+    cfs = list_cash_flows(session)
+    avanza = [c for c in cfs if c.source is TxnSource.avanza]
+    manual = [c for c in cfs if c.source is TxnSource.manual]
+    assert len(avanza) == 2            # not doubled
+    assert len(manual) == 1            # manual untouched
+    assert _dec(manual[0].amount_sek) == Decimal("500")
+    assert _count(session, CashFlow) == 3

@@ -85,6 +85,11 @@ class TxnSource(str, enum.Enum):
     manual = "manual"          # entered in-app (e.g. a rebalance leg)
 
 
+class CashFlowKind(str, enum.Enum):
+    deposit = "deposit"        # cash IN: amount_sek stored positive
+    withdrawal = "withdrawal"  # cash OUT: amount_sek stored negative
+
+
 def _utcnow() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
@@ -211,6 +216,28 @@ class Transaction(Base):
     amount_sek: Mapped[float | None] = mapped_column(MONEY, default=None)  # CSV Belopp (signed)
     fees_sek: Mapped[float] = mapped_column(MONEY, default=0)
     fx_rate: Mapped[float | None] = mapped_column(RATIO, default=None)     # CSV Valutakurs
+    source: Mapped[TxnSource] = mapped_column(
+        Enum(TxnSource, name="txn_source"), default=TxnSource.manual, index=True
+    )
+    note: Mapped[str | None] = mapped_column(Text, default=None)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class CashFlow(Base):
+    """External cash movements (deposits +, withdrawals -). Used to AUTO-DERIVE a
+    NAV snapshot's net_contribution for its period (see alphaos.db.cash_flows.
+    net_flow_between); instrument holdings are unaffected (those derive from
+    `transactions`)."""
+
+    __tablename__ = "cash_flows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    date: Mapped[dt.date] = mapped_column(Date, index=True)
+    # Signed SEK: deposits positive, withdrawals negative (set by kind on insert).
+    amount_sek: Mapped[float] = mapped_column(MONEY)
+    kind: Mapped[CashFlowKind] = mapped_column(Enum(CashFlowKind, name="cash_flow_kind"))
     source: Mapped[TxnSource] = mapped_column(
         Enum(TxnSource, name="txn_source"), default=TxnSource.manual, index=True
     )
