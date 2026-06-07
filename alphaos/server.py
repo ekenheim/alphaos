@@ -13,6 +13,10 @@ Endpoints:
   GET  /api/allocation     allocation breakdown (JSON-native)
   GET  /api/nav            NAV snapshots + current risk
   POST /api/nav            add a NAV snapshot
+  POST /api/nav/snapshot-now  upsert a derived snapshot for today (idempotent)
+  GET  /api/cashflows      list cash flows (deposits/withdrawals)
+  POST /api/cashflows      add a cash flow
+  DELETE /api/cashflows/{id} delete a cash flow
   GET  /api/risk           current risk
   POST /api/import/transactions  import Avanza CSV (?preview=true to parse only)
   POST /api/fx/refresh     refresh FX rates (Riksbank/ECB)
@@ -24,6 +28,7 @@ Run:  python -m alphaos.cli serve   (or:  uvicorn alphaos.server:app --port 8503
 
 from __future__ import annotations
 
+import datetime as dt
 from pathlib import Path
 
 from fastapi import FastAPI, File, Request, UploadFile
@@ -36,9 +41,10 @@ from .db import allocation as dballoc
 from .db import nav as dbnav
 from .db import fx as dbfx, pricing as dbpricing, importer as dbimporter
 from .db import transactions as dbtx
+from .db import cash_flows as dbcf
 from .db.serialize import (
     jsonable, sleeve_to_dict, holding_to_dict, nav_snapshot_to_dict,
-    config_to_dict, transaction_to_dict,
+    config_to_dict, transaction_to_dict, cash_flow_to_dict,
 )
 
 _DB_UNCONFIGURED = JSONResponse(status_code=503, content={"error": "database not configured"})
@@ -218,11 +224,32 @@ async def post_nav(request: Request) -> JSONResponse:
                 session,
                 as_of=body["as_of"],
                 gross_asset_value=body.get("gross_asset_value"),
-                loan_balance=body.get("loan_balance", 0),
-                net_contribution=body.get("net_contribution", 0),
+                loan_balance=body.get("loan_balance"),
+                net_contribution=body.get("net_contribution"),
                 notes=body.get("notes"),
             )
             payload = {"snapshot": nav_snapshot_to_dict(snapshot)}
+        return JSONResponse(payload)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.post("/api/nav/snapshot-now")
+async def post_snapshot_now(request: Request) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        with session_scope() as session:
+            snap = dbnav.upsert_snapshot(
+                session,
+                as_of=body.get("as_of") or dt.date.today(),
+                notes=body.get("notes"),
+            )
+            payload = {"snapshot": nav_snapshot_to_dict(snap)}
         return JSONResponse(payload)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
@@ -328,6 +355,45 @@ def post_prices_refresh() -> JSONResponse:
         return _DB_UNCONFIGURED
     with session_scope() as session:
         return JSONResponse(jsonable({"prices": dbpricing.refresh_prices(session)}))
+
+
+# --- Cash flows ---
+
+@app.get("/api/cashflows")
+def get_cashflows(limit: int | None = None) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        flows = dbcf.list_cash_flows(session, limit=limit)
+        return JSONResponse({"cashflows": [cash_flow_to_dict(c) for c in flows]})
+
+
+@app.post("/api/cashflows")
+async def post_cashflow(request: Request) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    body = await request.json()
+    try:
+        with session_scope() as session:
+            cf = dbcf.add_cash_flow(
+                session,
+                date=body["date"],
+                amount_sek=body["amount_sek"],
+                kind=body["kind"],
+                note=body.get("note"),
+            )
+            payload = {"cashflow": cash_flow_to_dict(cf)}
+        return JSONResponse(payload)
+    except (ValueError, KeyError) as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.delete("/api/cashflows/{cf_id}")
+def delete_cashflow(cf_id: int) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        return JSONResponse({"deleted": dbcf.delete_cash_flow(session, cf_id)})
 
 
 # --- Static dashboard ---

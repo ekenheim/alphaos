@@ -18,6 +18,8 @@ from .engine import (
 from .models import (
     AssetClass,
     Base,
+    CashFlow,
+    CashFlowKind,
     DeleverStatus,
     Holding,
     NavSnapshot,
@@ -29,6 +31,14 @@ from .models import (
     TransactionKind,
     TxnSource,
 )
+from .cash_flows import (
+    add_cash_flow,
+    delete_cash_flow,
+    list_cash_flows,
+    net_flow_between,
+    replace_avanza_cashflows,
+)
+from .reconcile import account_cash, account_position
 
 __all__ = [
     "database_url",
@@ -47,6 +57,15 @@ __all__ = [
     "Transaction",
     "TransactionKind",
     "TxnSource",
+    "CashFlow",
+    "CashFlowKind",
     "NavSnapshot",
     "DeleverStatus",
+    "add_cash_flow",
+    "delete_cash_flow",
+    "list_cash_flows",
+    "net_flow_between",
+    "replace_avanza_cashflows",
+    "account_cash",
+    "account_position",
 ]

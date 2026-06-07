@@ -48,11 +48,11 @@
         </div>
         <div class="field">
           <label for="f-loan">Loan balance</label>
-          <input id="f-loan" type="number" step="any" placeholder="0" />
+          <input id="f-loan" type="number" step="any" placeholder="carry forward" />
         </div>
         <div class="field">
           <label for="f-contrib">Net contribution</label>
-          <input id="f-contrib" type="number" step="any" placeholder="0" />
+          <input id="f-contrib" type="number" step="any" placeholder="auto from cash flows" />
         </div>
         <div class="field field-wide">
           <label for="f-notes">Notes</label>
@@ -60,6 +60,7 @@
         </div>
         <div class="form-actions">
           <button type="submit" class="btn">Add snapshot</button>
+          <button type="button" class="btn" id="snap-now">Snapshot today</button>
           <span id="form-msg" class="form-msg"></span>
         </div>
       </form>
@@ -77,6 +78,47 @@
             <tr><th>As of</th><th>Gross</th><th>Loan</th><th>Net contrib</th><th>Equity</th>
                 <th>TWR %</th><th>NAV index</th><th>Drawdown</th><th>Leverage</th>
                 <th>Belåningsgrad</th><th>Status</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-header">
+        <h2>Cash flows</h2>
+        <div class="card-sub">Deposits (+) / withdrawals (−) · drive snapshot net contribution · SEK</div>
+        <div class="card-actions"><span class="pill" id="cf-count">— rows</span></div>
+      </div>
+      <form id="cf-form" class="form-grid" autocomplete="off">
+        <div class="field">
+          <label for="f-cf-date">Date</label>
+          <input id="f-cf-date" type="date" required />
+        </div>
+        <div class="field">
+          <label for="f-cf-kind">Kind</label>
+          <select id="f-cf-kind">
+            <option value="deposit">deposit</option>
+            <option value="withdrawal">withdrawal</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="f-cf-amount">Amount (SEK)</label>
+          <input id="f-cf-amount" type="number" step="any" required placeholder="magnitude" />
+        </div>
+        <div class="field field-wide">
+          <label for="f-cf-note">Note</label>
+          <input id="f-cf-note" type="text" />
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="btn">Add cash flow</button>
+          <span id="cf-msg" class="form-msg"></span>
+        </div>
+      </form>
+      <div class="table-wrap">
+        <table id="cf-table">
+          <thead>
+            <tr><th>Date</th><th>Kind</th><th>Source</th><th>Amount</th><th>Note</th><th></th></tr>
           </thead>
           <tbody></tbody>
         </table>

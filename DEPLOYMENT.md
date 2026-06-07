@@ -215,6 +215,81 @@ needs egress at refresh time. **If the cluster has no outbound internet**, leave
 FX refresh unused and **set the rates by hand in Settings** — the cached values
 are used for all market-value math.
 
+## Daily NAV snapshot (CronJob)
+
+The image bundles a console script — **`alphaos-daily-snapshot`** (entry point
+`alphaos.jobs:main`, installed by `pip install .`) — that, in one transactional
+session:
+
+1. refreshes **FX** (`fx.refresh_fx`; never fails — keeps cached rates without egress),
+2. refreshes **MinIO** US-stock closes (guarded by MinIO credentials; a no-op if
+   `MINIO_*` is unset), and
+3. **upserts** one derived NAV snapshot for **today** (`nav.upsert_snapshot`).
+
+Run it by hand (same env as the app — needs `DATABASE_URL`/`PG*`, and optionally
+`MINIO_*`):
+
+```bash
+alphaos-daily-snapshot
+# [alphaos-daily-snapshot] 2026-06-07: fx ok=True src=riksbank; prices ok=True updated=3; snapshot equity=... nav_index=... drawdown=...
+```
+
+`upsert_snapshot` **replaces** any existing snapshot for the day, so the job is
+**idempotent** — re-running it for the same date is safe (`concurrencyPolicy:
+Forbid` below just avoids overlap).
+
+> The actual CronJob lives in the **separate Flux/GitOps repo** (this repo only
+> builds the image). The manifest below is a **reference sample** — copy it there
+> and wire the same DB (and optional MinIO) Secrets the app uses. No scheduler is
+> required for tests or local runs.
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: alphaos-daily-snapshot
+  namespace: alphaos
+spec:
+  schedule: "30 22 * * 1-5"      # ~after US close, weekdays (UTC); cluster TZ = UTC
+  concurrencyPolicy: Forbid      # never overlap runs
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+          containers:
+            - name: snapshot
+              image: ghcr.io/ekenheim/alphaos:latest
+              command: ["alphaos-daily-snapshot"]
+              env:
+                # DB — map the CPNG secret's `uri` (same as the app)
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: alphaos-db-pguser-alphaos   # <cluster>-pguser-<user>
+                      key: uri
+                # MinIO — OPTIONAL; omit the whole block to skip price refresh
+                - name: MINIO_ENDPOINT_URL
+                  valueFrom: { secretKeyRef: { name: alphaos-minio, key: endpoint } }
+                - name: MINIO_ACCESS_KEY_ID
+                  valueFrom: { secretKeyRef: { name: alphaos-minio, key: access_key } }
+                - name: MINIO_SECRET_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: alphaos-minio, key: secret_key } }
+                - name: MINIO_BUCKET
+                  value: stocks-us
+```
+
+> Schedule the snapshot to land **after** the DB migrations of any rollout (the
+> job shares the app image, so a deploy that runs `alphaos db upgrade` in an
+> initContainer keeps the schema current). FX/MinIO refresh failures are
+> non-fatal — the snapshot is still derived from the ledgers + last cached prices.
+
 ## Future: LAN registry
 
 To later publish to an internal registry (e.g. `registry.ekenhome.se/alphaos`)

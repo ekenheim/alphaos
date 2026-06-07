@@ -10,7 +10,7 @@ import enum
 from decimal import Decimal
 from typing import Any
 
-from .models import Holding, NavSnapshot, PortfolioConfig, Sleeve, Transaction
+from .models import CashFlow, Holding, NavSnapshot, PortfolioConfig, Sleeve, Transaction
 
 
 def _f(v: Any) -> float | None:
@@ -101,6 +101,17 @@ def transaction_to_dict(t: Transaction) -> dict[str, Any]:
         "fx_rate": _f(t.fx_rate),
         "source": t.source.value,
         "note": t.note,
+    }
+
+
+def cash_flow_to_dict(c: CashFlow) -> dict[str, Any]:
+    return {
+        "id": c.id,
+        "date": c.date.isoformat() if c.date else None,
+        "amount_sek": _f(c.amount_sek),
+        "kind": c.kind.value,
+        "source": c.source.value,
+        "note": c.note,
     }
 
 
