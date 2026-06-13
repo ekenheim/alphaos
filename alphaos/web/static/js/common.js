@@ -33,6 +33,23 @@ window.alphaos = {
     return data;
   },
 
+  async putJSON(path, body) {
+    const r = await fetch(path, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body || {}),
+    });
+    let data = {};
+    try { data = await r.json(); } catch (e) { /* non-JSON body */ }
+    if (!r.ok) {
+      const err = new Error(data.error || `${path}: HTTP ${r.status}`);
+      err.status = r.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
+  },
+
   // POST a single file as multipart/form-data, parse JSON response. Throws Error
   // with .status/.data on !ok (e.g. 400 parse/ValueError or 503 no database).
   async uploadFile(path, file, fieldName = "file") {

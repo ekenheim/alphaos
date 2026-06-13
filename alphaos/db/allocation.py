@@ -12,12 +12,20 @@ import datetime as dt
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from .config import get_config
 from .fx import fx_to_sek
-from .models import AssetClass, Holding, Portfolio, PriceSource, Sleeve, SleeveKind
+from .models import (
+    AssetClass,
+    Holding,
+    Portfolio,
+    PriceSource,
+    Sleeve,
+    SleeveKind,
+    SleeveWeightHistory,
+)
 
 _ZERO = Decimal("0")
 
@@ -73,6 +81,8 @@ def upsert_sleeve(
     notes: str | None = None,
 ) -> Sleeve:
     sleeve = get_sleeve(session, code)
+    created = sleeve is None
+    old_weight = _dec(sleeve.target_weight) if sleeve is not None else None
     if sleeve is None:
         sleeve = Sleeve(code=code, name=name or code)
         session.add(sleeve)
@@ -88,7 +98,56 @@ def upsert_sleeve(
     if notes is not None:
         sleeve.notes = notes
     session.flush()
+    # Record the dated allocation trail: a 'created' event for a new sleeve, an
+    # 'updated' event whenever the target weight actually changes.
+    if created:
+        _record_sleeve_history(session, sleeve, "created")
+    elif target_weight is not None and _dec(sleeve.target_weight) != old_weight:
+        _record_sleeve_history(session, sleeve, "updated")
     return sleeve
+
+
+def _record_sleeve_history(session: Session, sleeve: Sleeve, event: str) -> None:
+    """Append a sleeve_weight_history row (created/updated/deleted)."""
+    session.add(SleeveWeightHistory(
+        sleeve_code=sleeve.code,
+        name=sleeve.name,
+        target_weight=_dec(sleeve.target_weight),
+        event=event,
+    ))
+    session.flush()
+
+
+def delete_sleeve(session: Session, sleeve_id: int) -> bool:
+    """Delete a sleeve, PRESERVING its holdings (they detach to unassigned) and the
+    ledger/NAV history. Records a 'deleted' event in the sleeve-weight history.
+    Returns True if a sleeve was deleted.
+    """
+    sleeve = session.get(Sleeve, sleeve_id)
+    if sleeve is None:
+        return False
+    # Detach holdings explicitly (works on Postgres AND the sqlite test DB, where the
+    # FK ondelete=SET NULL would not fire). The relationship has no delete-orphan, so
+    # deleting the sleeve will not cascade to holdings.
+    session.execute(
+        update(Holding).where(Holding.sleeve_id == sleeve_id).values(sleeve_id=None)
+    )
+    _record_sleeve_history(session, sleeve, "deleted")
+    session.delete(sleeve)
+    session.flush()
+    return True
+
+
+def list_sleeve_weight_history(
+    session: Session, code: str | None = None, limit: int | None = 200
+) -> list[SleeveWeightHistory]:
+    """Most-recent-first sleeve target-weight history (optionally one sleeve)."""
+    stmt = select(SleeveWeightHistory).order_by(SleeveWeightHistory.changed_at.desc())
+    if code:
+        stmt = stmt.where(SleeveWeightHistory.sleeve_code == code)
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    return list(session.scalars(stmt))
 
 
 _DEFAULT_SLEEVES = [
@@ -106,24 +165,26 @@ _DEFAULT_SLEEVES = [
 
 
 def seed_default_sleeves(session: Session) -> int:
-    """Seed/refresh the V2-FRONTIER sleeves + target weights. Idempotent."""
+    """Bootstrap the V2-FRONTIER sleeves ONCE, only on an empty catalog.
+
+    Sleeves are operator-managed (add/remove/rename/re-weight from the dashboard),
+    so this no longer re-asserts the defaults on every deploy — otherwise the k8s
+    initContainer's `alphaos db seed` would resurrect deleted sleeves and overwrite
+    edited weights. On a fresh database it seeds the five defaults; if any sleeve
+    already exists it is a no-op.
+    """
+    if list_sleeves(session):
+        return 0
     n = 0
     for code, name, kind, tw, order, notes in _DEFAULT_SLEEVES:
-        sleeve = get_sleeve(session, code)
-        if sleeve is None:
-            session.add(Sleeve(
-                code=code, name=name, kind=kind,
-                target_weight=_dec(tw), sort_order=order, notes=notes,
-            ))
-            n += 1
-        else:
-            sleeve.name = name
-            sleeve.kind = kind
-            sleeve.target_weight = _dec(tw)
-            sleeve.sort_order = order
-            if not sleeve.notes:
-                sleeve.notes = notes
-    session.flush()
+        sleeve = Sleeve(
+            code=code, name=name, kind=kind,
+            target_weight=_dec(tw), sort_order=order, notes=notes,
+        )
+        session.add(sleeve)
+        session.flush()
+        _record_sleeve_history(session, sleeve, "created")
+        n += 1
     return n
 
 

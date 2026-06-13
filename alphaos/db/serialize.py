@@ -10,7 +10,16 @@ import enum
 from decimal import Decimal
 from typing import Any
 
-from .models import CashFlow, Holding, NavSnapshot, PortfolioConfig, Sleeve, Transaction
+from .models import (
+    CashFlow,
+    FxRate,
+    Holding,
+    NavSnapshot,
+    PortfolioConfig,
+    Sleeve,
+    SleeveWeightHistory,
+    Transaction,
+)
 
 
 def _f(v: Any) -> float | None:
@@ -133,12 +142,28 @@ def config_to_dict(c: PortfolioConfig) -> dict[str, Any]:
         "reentry_recovery": _f(c.reentry_recovery),
         "forced_sale_dd": _f(c.forced_sale_dd),
         "delever_floor_leverage": _f(c.delever_floor_leverage),
-        "external_reserve": _f(c.external_reserve),
-        "planning_cagr_low": _f(c.planning_cagr_low),
-        "planning_cagr_high": _f(c.planning_cagr_high),
         "fx_usd_sek": _f(c.fx_usd_sek),
         "fx_eur_sek": _f(c.fx_eur_sek),
         "fx_as_of": c.fx_as_of.isoformat() if c.fx_as_of else None,
         "fx_source": c.fx_source,
         "notes": c.notes,
+    }
+
+
+def fx_rate_to_dict(r: FxRate) -> dict[str, Any]:
+    return {
+        "as_of": r.as_of.isoformat() if r.as_of else None,
+        "usd_sek": _f(r.usd_sek),
+        "eur_sek": _f(r.eur_sek),
+        "source": r.source,
+    }
+
+
+def sleeve_weight_history_to_dict(h: SleeveWeightHistory) -> dict[str, Any]:
+    return {
+        "changed_at": h.changed_at.isoformat() if h.changed_at else None,
+        "sleeve_code": h.sleeve_code,
+        "name": h.name,
+        "target_weight": _f(h.target_weight),
+        "event": h.event,
     }

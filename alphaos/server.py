@@ -49,6 +49,7 @@ from .db import cash_flows as dbcf
 from .db.serialize import (
     jsonable, sleeve_to_dict, holding_to_dict, nav_snapshot_to_dict,
     config_to_dict, transaction_to_dict, cash_flow_to_dict,
+    fx_rate_to_dict, sleeve_weight_history_to_dict,
 )
 
 _DB_UNCONFIGURED = JSONResponse(status_code=503, content={"error": "database not configured"})
@@ -137,6 +138,24 @@ async def post_sleeve(request: Request) -> JSONResponse:
         return JSONResponse(payload)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
+
+
+@app.get("/api/sleeves/history")
+def get_sleeve_history(code: str | None = None, limit: int | None = 200) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        rows = dballoc.list_sleeve_weight_history(session, code=code, limit=limit)
+        return JSONResponse({"history": [sleeve_weight_history_to_dict(h) for h in rows]})
+
+
+@app.delete("/api/sleeves/{sleeve_id}")
+def delete_sleeve(sleeve_id: int) -> JSONResponse:
+    """Delete a sleeve; its holdings detach to Unassigned, history is preserved."""
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        return JSONResponse({"deleted": dballoc.delete_sleeve(session, sleeve_id)})
 
 
 # --- Holdings ---
@@ -382,6 +401,37 @@ async def post_transaction(request: Request) -> JSONResponse:
         return JSONResponse(status_code=400, content={"error": str(e)})
 
 
+@app.put("/api/transactions/{txn_id}")
+async def put_transaction(txn_id: int, request: Request) -> JSONResponse:
+    """Edit an existing transaction (partial); recomputes the affected holding(s)."""
+    if not have_database():
+        return _DB_UNCONFIGURED
+    body = await request.json()
+    try:
+        with session_scope() as session:
+            txn = dbtx.update_transaction(
+                session,
+                txn_id,
+                date=body.get("date"),
+                isin=body.get("isin"),
+                kind=body.get("kind"),
+                quantity=body.get("quantity"),
+                price=body.get("price"),
+                currency=body.get("currency"),
+                amount_sek=body.get("amount_sek"),
+                fees_sek=body.get("fees_sek"),
+                symbol=body.get("symbol"),
+                name=body.get("name"),
+                note=body.get("note"),
+            )
+            if txn is None:
+                return JSONResponse(status_code=404, content={"error": "transaction not found"})
+            payload = {"transaction": transaction_to_dict(txn)}
+        return JSONResponse(payload)
+    except (ValueError, KeyError) as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
+
+
 @app.delete("/api/transactions/{txn_id}")
 def delete_transaction(txn_id: int) -> JSONResponse:
     if not have_database():
@@ -407,6 +457,15 @@ def post_fx_refresh() -> JSONResponse:
         return _DB_UNCONFIGURED
     with session_scope() as session:
         return JSONResponse(jsonable({"fx": dbfx.refresh_fx(session)}))
+
+
+@app.get("/api/fx/history")
+def get_fx_history(limit: int | None = 90) -> JSONResponse:
+    if not have_database():
+        return _DB_UNCONFIGURED
+    with session_scope() as session:
+        rows = dbfx.list_fx_history(session, limit=limit)
+        return JSONResponse({"fx_history": [fx_rate_to_dict(r) for r in rows]})
 
 
 @app.post("/api/prices/refresh")

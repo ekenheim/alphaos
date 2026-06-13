@@ -230,9 +230,34 @@ def _nav_index_reliability(
     return (not reasons), ("; ".join(reasons) or None)
 
 
+def compute_cagr_since_inception(
+    session: Session, nav_index_live: Any, today: dt.date, *, reliable: bool
+) -> tuple[float | None, str | None]:
+    """Annualized TWR since the first snapshot.
+
+    The NAV index is baselined at 1.0 on the first snapshot, so the live index IS
+    the cumulative growth factor since inception. Returns (cagr, inception_iso).
+    cagr is None (but inception is still returned) when the index isn't trustworthy
+    or there isn't enough elapsed history (< ~30 days) to annualize meaningfully.
+    """
+    snaps = list_snapshots(session)
+    if not snaps:
+        return None, None
+    inception = snaps[0].as_of
+    iso = inception.isoformat()
+    days = (today - inception).days
+    if not reliable or days < 30 or nav_index_live is None:
+        return None, iso
+    nav = float(_dec(nav_index_live))
+    if nav <= 0:
+        return None, iso
+    years = days / 365.25
+    return nav ** (1.0 / years) - 1.0, iso
+
+
 def current_risk(session: Session) -> dict[str, Any]:
     """Assemble the live risk picture for the dashboard: NAV/drawdown, de-lever
-    distances, leverage vs glide target, belaningsgrad headroom, planning case.
+    distances, leverage vs glide target, belaningsgrad headroom, CAGR since inception.
 
     The current reading is computed LIVE off the latest closes — gross/loan/equity
     are derived as-of today (as in add_snapshot) and the per-period math runs against
@@ -262,8 +287,8 @@ def current_risk(session: Session) -> dict[str, Any]:
         "belaningsgrad": None,
         "delever_status": "normal",
         "thresholds": thresholds,
-        "external_reserve": _f(cfg.external_reserve),
-        "planning_cagr": [_f(cfg.planning_cagr_low), _f(cfg.planning_cagr_high)],
+        "cagr_since_inception": None,
+        "inception_date": None,
         "account_label": cfg.account_label,
         "base_currency": cfg.base_currency,
         "action": "no NAV snapshots yet",
@@ -332,4 +357,13 @@ def current_risk(session: Session) -> dict[str, Any]:
         "target_leverage": _f(target_leverage(cfg, equity)),
         "action": action,
     })
+
+    # Annualized return since inception (TWR), from the NAV index baselined at 1.0
+    # on the first snapshot. Only shown when the index is trustworthy and there is
+    # enough elapsed history; otherwise None ("—" on the dashboard).
+    cagr, inception = compute_cagr_since_inception(
+        session, m["nav_index"], today, reliable=nav_reliable
+    )
+    base["cagr_since_inception"] = cagr
+    base["inception_date"] = inception
     return base

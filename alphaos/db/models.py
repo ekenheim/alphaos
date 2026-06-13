@@ -131,10 +131,6 @@ class PortfolioConfig(Base):
     # (leverage_floor, which is the large-portfolio target).
     delever_floor_leverage: Mapped[float] = mapped_column(RATIO, default=1.06)
 
-    external_reserve: Mapped[float] = mapped_column(MONEY, default=75_000)
-    planning_cagr_low: Mapped[float] = mapped_column(RATIO, default=0.10)
-    planning_cagr_high: Mapped[float] = mapped_column(RATIO, default=0.16)
-
     # FX rates to SEK (cached from Riksbank/ECB; editable). 1 unit -> SEK.
     fx_usd_sek: Mapped[float] = mapped_column(RATIO, default=9.34)
     fx_eur_sek: Mapped[float] = mapped_column(RATIO, default=10.87)
@@ -166,8 +162,10 @@ class Sleeve(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=_utcnow
     )
 
+    # No delete-orphan: deleting a sleeve must PRESERVE its holdings (they detach to
+    # unassigned via the FK's ondelete=SET NULL / explicit detach in delete_sleeve).
     holdings: Mapped[list["Holding"]] = relationship(
-        back_populates="sleeve", cascade="all, delete-orphan", order_by="Holding.symbol"
+        back_populates="sleeve", order_by="Holding.symbol", passive_deletes=True
     )
 
 
@@ -294,3 +292,37 @@ class NavSnapshot(Base):
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+
+
+class FxRate(Base):
+    """Daily historical FX rate to SEK (one row per rate date). The current rates
+    still live on PortfolioConfig (the cache used for valuation); this table is the
+    append-only history, written by refresh_fx on each (daily) run."""
+
+    __tablename__ = "fx_rates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    as_of: Mapped[dt.date] = mapped_column(Date, unique=True, index=True)  # rate source date
+    usd_sek: Mapped[float] = mapped_column(RATIO)
+    eur_sek: Mapped[float] = mapped_column(RATIO)
+    source: Mapped[str | None] = mapped_column(String(32), default=None)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
+class SleeveWeightHistory(Base):
+    """Dated log of sleeve target-weight changes (created/updated/deleted). Keyed by
+    sleeve_code (NOT a FK) so the record survives the sleeve's deletion — the
+    historical allocation trail."""
+
+    __tablename__ = "sleeve_weight_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    changed_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+    sleeve_code: Mapped[str] = mapped_column(String(32), index=True)
+    name: Mapped[str | None] = mapped_column(String(128), default=None)
+    target_weight: Mapped[float] = mapped_column(RATIO, default=0)
+    event: Mapped[str] = mapped_column(String(16))  # created | updated | deleted

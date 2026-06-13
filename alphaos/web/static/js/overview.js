@@ -81,11 +81,17 @@
     $("t-equity").textContent = A.fmtSEK(risk.equity);
     $("t-loan").textContent = A.fmtSEK(risk.loan_balance);
     $("t-gross-foot").textContent = "gross " + A.fmtSEK(risk.gross_asset_value);
-    $("t-reserve").textContent = A.fmtSEK(risk.external_reserve);
 
-    const cagr = risk.planning_cagr || [];
-    $("t-cagr").textContent = (cagr[0] != null && cagr[1] != null)
-      ? `${A.fmtPct(cagr[0], 0)} – ${A.fmtPct(cagr[1], 0)}` : "—";
+    // Growth since inception = NAV index (baselined at 1.0) expressed as a percent.
+    const growth = risk.nav_index != null ? risk.nav_index - 1 : null;
+    $("t-growth").textContent = growth != null ? A.fmtPct(growth, 1) : "—";
+    if (growth != null) $("t-growth").classList.toggle("neg", growth < 0);
+
+    // CAGR since inception (annualized TWR), shown only when the index is reliable.
+    $("t-cagr").textContent = risk.cagr_since_inception != null
+      ? A.fmtPct(risk.cagr_since_inception, 1) : "—";
+    $("t-cagr-foot").textContent = risk.inception_date
+      ? `since ${risk.inception_date}` : "annualized TWR";
   }
 
   function renderStatus(risk) {

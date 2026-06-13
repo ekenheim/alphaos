@@ -19,9 +19,6 @@
     { k: "delever_full_dd", l: "De-lever full DD", t: "num", h: "negative, e.g. -0.45" },
     { k: "reentry_recovery", l: "Re-entry recovery", t: "num", h: "fraction, e.g. 0.20" },
     { k: "forced_sale_dd", l: "Forced-sale DD", t: "num", h: "negative, e.g. -0.57" },
-    { k: "external_reserve", l: "External reserve (SEK)", t: "num", h: "off-book buffer" },
-    { k: "planning_cagr_low", l: "Planning CAGR low", t: "num", h: "fraction, e.g. 0.10" },
-    { k: "planning_cagr_high", l: "Planning CAGR high", t: "num", h: "fraction, e.g. 0.16" },
     { k: "notes", l: "Notes", t: "textarea", h: "" },
   ];
 
@@ -99,6 +96,7 @@
       if (fx.ok) {
         msg.className = "form-msg ok";
         msg.textContent = `refreshed ✓${fx.source ? " · " + fx.source : ""}`;
+        loadFxHistory();
       } else {
         msg.className = "form-msg err";
         msg.textContent = fx.error || "FX refresh failed; kept cached rates";
@@ -111,6 +109,27 @@
     }
   }
 
+  async function loadFxHistory() {
+    const box = $("fx-history");
+    if (!box) return;
+    try {
+      const res = await A.getJSON("/api/fx/history?limit=60");
+      const rows = res.fx_history || [];
+      if (!rows.length) { box.innerHTML = '<div class="muted">No FX history yet.</div>'; return; }
+      const trs = rows.map((r) => `<tr>
+        <td>${r.as_of || "—"}</td>
+        <td>${A.fmtNum(r.usd_sek, 4)}</td>
+        <td>${A.fmtNum(r.eur_sek, 4)}</td>
+        <td>${r.source || "—"}</td>
+      </tr>`).join("");
+      box.innerHTML = `<div class="table-wrap"><table>
+        <thead><tr><th>Date</th><th>USD/SEK</th><th>EUR/SEK</th><th>Source</th></tr></thead>
+        <tbody>${trs}</tbody></table></div>`;
+    } catch (e) {
+      box.innerHTML = `<div class="muted">${A.isDbError(e) ? "database not configured" : e.message}</div>`;
+    }
+  }
+
   async function load() {
     A.dbChip($("db-chip"));
     try {
@@ -118,6 +137,7 @@
       const cfg = data.config || {};
       buildForm(cfg);
       fillFx(cfg);
+      loadFxHistory();
     } catch (e) {
       A.showNotice($("notice"), e);
     }

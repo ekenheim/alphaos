@@ -244,6 +244,69 @@ def delete_transaction(session: Session, txn_id: int) -> bool:
     return True
 
 
+def update_transaction(
+    session: Session,
+    txn_id: int,
+    *,
+    date: dt.date | str | None = None,
+    isin: str | None = None,
+    kind: TransactionKind | str | None = None,
+    quantity: Any = None,
+    price: Any = None,
+    currency: str | None = None,
+    amount_sek: Any = None,
+    fees_sek: Any = None,
+    fx_rate: Any = None,
+    symbol: str | None = None,
+    name: str | None = None,
+    note: str | None = None,
+) -> Transaction | None:
+    """Edit an existing transaction in place; recompute the affected holding(s).
+
+    Only provided fields are changed (partial update). Recomputes both the old and
+    new ISIN when the ISIN changes. Returns the updated row, or None if not found.
+    """
+    txn = session.get(Transaction, txn_id)
+    if txn is None:
+        return None
+    affected = {txn.isin}
+
+    if date is not None:
+        txn.date = _as_date(date)
+    if isin is not None:
+        txn.isin = (isin or "").strip().upper()
+        if not txn.isin:
+            raise ValueError("isin is required")
+        affected.add(txn.isin)
+    if kind is not None:
+        txn.kind = _as_kind(kind)
+    if quantity is not None:
+        q = abs(_dec(quantity))
+        if q <= _ZERO:
+            raise ValueError("quantity must be > 0")
+        txn.quantity = q
+    if price is not None:
+        txn.price = _dec(price)
+    if currency is not None:
+        txn.currency = (currency or "SEK").upper()
+    if amount_sek is not None:
+        txn.amount_sek = _dec(amount_sek)
+    if fees_sek is not None:
+        txn.fees_sek = _dec(fees_sek or 0)
+    if fx_rate is not None:
+        txn.fx_rate = _dec(fx_rate)
+    if symbol is not None:
+        txn.symbol = symbol or None
+    if name is not None:
+        txn.name = name
+    if note is not None:
+        txn.note = note
+
+    session.flush()
+    recompute_holdings(session, isins=affected)
+    return txn
+
+
 def replace_avanza_range(
     session: Session, txns: list[dict[str, Any]], date_min: dt.date | str, date_max: dt.date | str
 ) -> int:

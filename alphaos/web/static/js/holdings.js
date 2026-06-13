@@ -118,10 +118,10 @@
       tr.addEventListener("click", () => toggleHistory(tr)));
   }
 
-  // --- Per-position transaction history (GET /api/history) ---
+  // --- Per-position transaction history (editable: add / edit / delete) ---
 
   // Toggle an inline expand-row beneath a holding row, lazily loading its
-  // transaction ledger (the 10→12→8 running-quantity timeline).
+  // editable transaction ledger. Add a buy/sell, edit a row in place, or delete.
   async function toggleHistory(tr) {
     const next = tr.nextElementSibling;
     if (next && next.classList.contains("expand-row")) {
@@ -134,36 +134,115 @@
     const exp = document.createElement("tr");
     exp.className = "expand-row";
     exp.innerHTML = `<td colspan="${cols}"><div class="expand-inner">
-      <div class="subcard-title">History · ${isin}</div>
       <div class="muted">Loading history…</div></div></td>`;
     tr.after(exp);
     tr.classList.add("expanded");
+    await renderHistory(exp.querySelector(".expand-inner"), isin);
+  }
+
+  async function renderHistory(inner, isin) {
     try {
       const res = await A.getJSON(`/api/history?isin=${encodeURIComponent(isin)}`);
-      exp.querySelector(".expand-inner").innerHTML =
-        `<div class="subcard-title">History · ${isin}</div>` + historyTable(res.history || []);
+      inner.innerHTML =
+        `<div class="subcard-title">History · ${isin}</div>` +
+        historyTable(res.history || []) + addTxnForm(isin);
+      wireHistory(inner, isin);
     } catch (e) {
-      exp.querySelector(".expand-inner").innerHTML =
+      inner.innerHTML =
         `<div class="subcard-title">History · ${isin}</div>` +
         `<div class="form-msg err">${A.isDbError(e) ? "database not configured" : e.message}</div>`;
     }
   }
 
   function historyTable(hist) {
-    if (!hist.length) return '<div class="muted">No transactions for this ISIN.</div>';
-    const rows = hist.map((t) => `<tr>
-      <td>${t.date || "—"}</td>
-      <td class="${t.kind === "sell" ? "neg" : "pos"}">${t.kind || ""}</td>
-      <td>${A.fmtNum(t.quantity, 2)}</td>
-      <td>${A.fmtNum(t.price, 2)}</td>
+    if (!hist.length) return '<div class="muted">No transactions yet — add one below.</div>';
+    const rows = hist.map((t) => `<tr data-tx="${t.id}">
+      <td><input type="date" class="tx-date" value="${t.date || ""}" disabled></td>
+      <td><select class="tx-kind" disabled>
+        <option value="buy"${t.kind === "buy" ? " selected" : ""}>buy</option>
+        <option value="sell"${t.kind === "sell" ? " selected" : ""}>sell</option></select></td>
+      <td><input type="number" step="any" class="tx-qty" value="${t.quantity}" disabled></td>
+      <td><input type="number" step="any" class="tx-price" value="${t.price}" disabled></td>
       <td>${A.fmtNum(t.running_qty, 2)}</td>
       <td>${t.source || ""}</td>
-      <td style="text-align:left">${t.note || ""}</td>
+      <td><input type="text" class="tx-note" value="${(t.note || "").replace(/"/g, "&quot;")}" disabled></td>
+      <td>
+        <button class="btn btn-ghost btn-sm" data-tx-edit="${t.id}">edit</button>
+        <button class="btn btn-sm hidden" data-tx-save="${t.id}">save</button>
+        <button class="btn btn-ghost btn-sm hidden" data-tx-cancel="${t.id}">cancel</button>
+        <button class="leg-x" data-tx-del="${t.id}" data-src="${t.source || ""}" title="delete">×</button>
+      </td>
     </tr>`).join("");
     return `<div class="table-wrap"><table>
       <thead><tr><th>Date</th><th>Kind</th><th>Qty</th><th>Price</th>
-        <th>Running qty</th><th>Source</th><th style="text-align:left">Note</th></tr></thead>
+        <th>Running qty</th><th>Source</th><th style="text-align:left">Note</th><th></th></tr></thead>
       <tbody>${rows}</tbody></table></div>`;
+  }
+
+  function addTxnForm(isin) {
+    const today = new Date().toISOString().slice(0, 10);
+    return `<div class="subcard" style="margin-top:10px;padding:10px">
+      <div class="subcard-title">Add buy / sell</div>
+      <div class="form-grid">
+        <div class="field"><label>Date</label><input type="date" id="atx-date-${isin}" value="${today}"></div>
+        <div class="field"><label>Kind</label><select id="atx-kind-${isin}"><option value="buy">buy</option><option value="sell">sell</option></select></div>
+        <div class="field"><label>Quantity</label><input type="number" step="any" id="atx-qty-${isin}"></div>
+        <div class="field"><label>Price</label><input type="number" step="any" id="atx-price-${isin}"></div>
+        <div class="field field-wide"><label>Note</label><input type="text" id="atx-note-${isin}"></div>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-sm" data-tx-add="${isin}">Add transaction</button>
+        <span class="form-msg" data-tx-msg></span>
+      </div></div>`;
+  }
+
+  // Wire add/edit/delete on a freshly-rendered history block. Mutations call
+  // load() to refresh the derived holding values (qty/avg) in the parent table.
+  function wireHistory(inner, isin) {
+    inner.querySelectorAll("[data-tx-edit]").forEach((b) => b.addEventListener("click", () => {
+      const row = b.closest("tr");
+      row.querySelectorAll("input,select").forEach((el) => (el.disabled = false));
+      b.classList.add("hidden");
+      row.querySelector("[data-tx-save]").classList.remove("hidden");
+      row.querySelector("[data-tx-cancel]").classList.remove("hidden");
+    }));
+    inner.querySelectorAll("[data-tx-cancel]").forEach((b) =>
+      b.addEventListener("click", () => renderHistory(inner, isin)));
+    inner.querySelectorAll("[data-tx-save]").forEach((b) => b.addEventListener("click", async () => {
+      const row = b.closest("tr");
+      const body = {
+        date: row.querySelector(".tx-date").value,
+        kind: row.querySelector(".tx-kind").value,
+        quantity: parseFloat(row.querySelector(".tx-qty").value),
+        price: parseFloat(row.querySelector(".tx-price").value),
+        note: row.querySelector(".tx-note").value,
+      };
+      try { await A.putJSON(`/api/transactions/${b.dataset.txSave}`, body); await load(); }
+      catch (e) { A.showNotice($("notice"), e); }
+    }));
+    inner.querySelectorAll("[data-tx-del]").forEach((b) => b.addEventListener("click", async () => {
+      const warn = b.dataset.src === "avanza"
+        ? "\n\nThis is an 'avanza' row — it will be re-created on the next CSV import." : "";
+      if (!confirm(`Delete this transaction?${warn}`)) return;
+      try { await A.deleteJSON(`/api/transactions/${b.dataset.txDel}`); await load(); }
+      catch (e) { A.showNotice($("notice"), e); }
+    }));
+    const addBtn = inner.querySelector("[data-tx-add]");
+    if (addBtn) addBtn.addEventListener("click", async () => {
+      const msg = inner.querySelector("[data-tx-msg]");
+      const g = (p) => inner.querySelector(`#atx-${p}-${isin}`);
+      const qty = parseFloat(g("qty").value);
+      const price = parseFloat(g("price").value);
+      if (!g("date").value || isNaN(qty) || isNaN(price)) {
+        msg.className = "form-msg err"; msg.textContent = "date, quantity and price are required"; return;
+      }
+      const body = {
+        isin, date: g("date").value, kind: g("kind").value,
+        quantity: qty, price: price, note: g("note").value.trim() || undefined,
+      };
+      try { await A.postJSON("/api/transactions", body); await load(); }
+      catch (e) { msg.className = "form-msg err"; msg.textContent = e.message; }
+    });
   }
 
   // Look up a holding (and its sleeve code) across the allocation payload.

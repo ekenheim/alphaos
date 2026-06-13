@@ -13,9 +13,11 @@ import urllib.request
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import get_config
+from .models import FxRate
 
 # Riksbank Swea: series return SEK per 1 unit of the foreign currency.
 _RIKSBANK = "https://api.riksbank.se/swea/v1/Observations/Latest/{series}"
@@ -102,6 +104,11 @@ def refresh_fx(session: Session, timeout: float = 8.0) -> dict[str, Any]:
         except Exception:
             pass
     cfg.fx_source = res.get("source")
+    # Record an append-only history row, keyed by the rate's source date (upsert),
+    # so the daily job builds a historical FX series. Falls back to today if the
+    # source gave no date.
+    record_date = cfg.fx_as_of or dt.date.today()
+    _record_fx_history(session, record_date, cfg.fx_usd_sek, cfg.fx_eur_sek, cfg.fx_source)
     session.flush()
     return {
         "ok": True,
@@ -110,6 +117,25 @@ def refresh_fx(session: Session, timeout: float = 8.0) -> dict[str, Any]:
         "as_of": cfg.fx_as_of.isoformat() if cfg.fx_as_of else None,
         "source": cfg.fx_source,
     }
+
+
+def _record_fx_history(session: Session, as_of: dt.date, usd_sek, eur_sek, source) -> None:
+    """Upsert one fx_rates row for `as_of` (idempotent: same day overwrites)."""
+    row = session.scalars(select(FxRate).where(FxRate.as_of == as_of)).first()
+    if row is None:
+        row = FxRate(as_of=as_of)
+        session.add(row)
+    row.usd_sek = usd_sek
+    row.eur_sek = eur_sek
+    row.source = source
+
+
+def list_fx_history(session: Session, limit: int | None = 90) -> list[FxRate]:
+    """Most-recent-first FX history rows (default last 90)."""
+    stmt = select(FxRate).order_by(FxRate.as_of.desc())
+    if limit is not None:
+        stmt = stmt.limit(limit)
+    return list(session.scalars(stmt))
 
 
 def fx_to_sek(cfg, currency: str | None) -> Decimal:

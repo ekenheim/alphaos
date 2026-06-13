@@ -31,9 +31,56 @@
         `<td>${A.fmtPct(r.current_weight, 1)}</td>` +
         `<td class="${driftCls}">${A.fmtPct(r.drift, 1)}</td>` +
         `<td>${A.fmtSEK(r.current_value)}</td>` +
-        `<td class="${dCls}">${A.fmtSEKSigned(r.rebalance_delta)}</td>`;
+        `<td class="${dCls}">${A.fmtSEKSigned(r.rebalance_delta)}</td>` +
+        `<td><button class="leg-x" data-del-sleeve="${r.id}" data-code="${r.code}" title="delete sleeve">×</button></td>`;
       tb.appendChild(tr);
     });
+    tb.querySelectorAll("[data-del-sleeve]").forEach((b) => b.addEventListener("click", async () => {
+      const code = b.dataset.code;
+      if (!confirm(`Delete sleeve ${code}?\n\nIts holdings move to Unassigned; the transactions ledger, NAV history, and the sleeve-weight history are all kept.`)) return;
+      try { await A.deleteJSON(`/api/sleeves/${b.dataset.delSleeve}`); await load(); }
+      catch (e) { A.showNotice($("notice"), e); }
+    }));
+  }
+
+  async function loadSleeveHistory() {
+    const box = $("sleeve-history");
+    if (!box) return;
+    try {
+      const res = await A.getJSON("/api/sleeves/history?limit=100");
+      const rows = res.history || [];
+      if (!rows.length) { box.innerHTML = '<div class="muted">No changes recorded yet.</div>'; return; }
+      const trs = rows.map((h) => `<tr>
+        <td>${(h.changed_at || "").replace("T", " ").slice(0, 19)}</td>
+        <td><b>${h.sleeve_code}</b></td>
+        <td>${h.event}</td>
+        <td>${A.fmtPct(h.target_weight, 1)}</td>
+      </tr>`).join("");
+      box.innerHTML = `<div class="table-wrap"><table>
+        <thead><tr><th>When</th><th>Sleeve</th><th>Event</th><th>Target %</th></tr></thead>
+        <tbody>${trs}</tbody></table></div>`;
+    } catch (e) {
+      box.innerHTML = `<div class="muted">${A.isDbError(e) ? "database not configured" : e.message}</div>`;
+    }
+  }
+
+  async function onNewSleeve(ev) {
+    ev.preventDefault();
+    const msg = $("new-msg");
+    msg.className = "form-msg"; msg.textContent = "saving…";
+    const code = $("n-code").value.trim();
+    if (!code) { msg.className = "form-msg err"; msg.textContent = "code is required"; return; }
+    let w = parseFloat($("n-weight").value);
+    if (isNaN(w)) w = 0; else if (w > 1.5) w = w / 100; // accept percent entry (15 -> 0.15)
+    try {
+      await A.postJSON("/api/sleeves", {
+        code, name: $("n-name").value.trim() || undefined,
+        kind: $("n-kind").value, target_weight: w,
+      });
+      msg.className = "form-msg ok"; msg.textContent = "added ✓";
+      $("new-sleeve-form").reset();
+      await load();
+    } catch (e) { msg.className = "form-msg err"; msg.textContent = e.message; }
   }
 
   function renderChart(rows) {
@@ -78,6 +125,7 @@
       renderTable(SLEEVES);
       renderChart(SLEEVES);
       fillSleeveSelect(SLEEVES);
+      loadSleeveHistory();
     } catch (e) {
       A.showNotice($("notice"), e);
     }
@@ -106,5 +154,6 @@
     load();
     $("sleeve-form").addEventListener("submit", onSubmit);
     $("f-code").addEventListener("change", syncWeight);
+    $("new-sleeve-form").addEventListener("submit", onNewSleeve);
   });
 })();
