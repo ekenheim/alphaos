@@ -75,7 +75,7 @@ K8S_RUN_CONFIG = {
 class IngestConfig(Config):
     # Calendar-day lookback gap-scan when no explicit window is given.
     lookback_days: int = 7
-    # None -> both day_aggs_v1 and minute_aggs_v1 (required to advance checkpoint).
+    # None -> both day_aggs_v1 and minute_aggs_v1.
     datasets: list[str] | None = None
     # Escape hatch: extra raw CLI flags appended verbatim (e.g. ["--force"]).
     extra_args: list[str] = []
@@ -94,17 +94,25 @@ class BuildBarsConfig(Config):
 
 @op
 def ingest_massive_op(context: OpExecutionContext, config: IngestConfig) -> None:
-    """Stage 1: Massive.com -> MinIO raw flatfiles + per-ticker parquet."""
-    argv: list[str] = ["--lookback-days", str(config.lookback_days)]
+    """Stage 1: mirror Massive.com flatfiles to MinIO raw, nothing else.
+
+    Uploads the raw day_aggs_v1/ + minute_aggs_v1/ csv.gz exactly as the vendor
+    provides them. The legacy per-ticker pivot/resample (daily/{TICKER}.parquet,
+    1min/, 5min/, 15min/) is intentionally DISABLED (--no-pivot): the corpus and
+    all resampling are produced downstream by build_bars, date-partitioned and
+    idempotent. So this stage never touches per-ticker files.
+    """
+    # --no-pivot is hardcoded: raw mirror only, no per-ticker output.
+    argv: list[str] = ["--lookback-days", str(config.lookback_days), "--no-pivot"]
     if config.datasets:
         argv += ["--datasets", *config.datasets]
     argv += config.extra_args
 
-    context.log.info("Running ingest_massive %s", argv)
+    context.log.info("Running ingest_massive (raw mirror only) %s", argv)
     rc = ingest_mod.main(argv)
     if rc != 0:
         raise Failure(f"ingest_massive exited with code {rc}")
-    context.log.info("ingest_massive complete.")
+    context.log.info("ingest_massive complete (raw flatfiles mirrored).")
 
 
 @op(ins={"start": In(Nothing)})

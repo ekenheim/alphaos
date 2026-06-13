@@ -297,17 +297,21 @@ pipeline that **produces** the `bars/` corpus this app reads for US-stock pricin
 It runs as a **Dagster** job (`market_data_daily`) in the cluster's existing
 Dagster deployment. Two ordered stages:
 
-1. **`ingest_massive`** (`marketdata.ingest_massive`) — pull Massive.com flatfiles →
-   upload raw `day_aggs_v1/` + `minute_aggs_v1/` csv.gz to MinIO → pivot to
-   per-ticker parquet. Idempotent, self-healing (checkpoint + 7-day gap-scan).
+1. **`ingest_massive`** (`marketdata.ingest_massive`) — **mirror only**: upload the
+   raw `day_aggs_v1/` + `minute_aggs_v1/` csv.gz to MinIO exactly as the vendor
+   provides them. The job runs it with `--no-pivot`, so the legacy per-ticker
+   pivot/resample (`daily/{TICKER}.parquet`, `1min/`, …) is **not** produced.
+   Idempotent, self-healing (7-day lookback gap-scan).
 2. **`build_bars`** (`marketdata.build_bars`) — build the Hive
-   `bars/tf=1day|1min|5min|15min/date=YYYY-MM-DD/part.parquet` corpus from the raw
-   flatfiles stage 1 landed. Idempotent (skips built partitions).
+   `bars/tf=1day|1min|5min|15min/date=YYYY-MM-DD/part.parquet` corpus (incl. the
+   5/15min resampling) from the raw flatfiles stage 1 landed. RAW, split-unadjusted,
+   date-partitioned, idempotent (skips already-built partitions). This is the layout
+   AlphaOS reads.
 
-> **This pipeline WRITES to MinIO** (raw csv.gz, parquet, `_meta.json`, the build
-> report, and `meta/_pivot_checkpoint.txt`). Unlike the app's read-only price
-> refresh, it needs **write-capable** MinIO credentials, plus **Massive.com**
-> credentials. The pipeline does **not** touch Postgres.
+> **This pipeline WRITES to MinIO** (raw csv.gz + the `bars/` corpus + `_meta.json`
+> + the build report). Unlike the app's read-only price refresh, it needs
+> **write-capable** MinIO credentials, plus **Massive.com** credentials. The
+> pipeline does **not** touch Postgres.
 
 Run a stage by hand (console scripts installed by `pip install .`):
 
