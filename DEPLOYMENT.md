@@ -354,15 +354,19 @@ dagster-user-deployments:
           value: stocks-us
 ```
 
-> Each run launches its own pod via the chart's **`K8sRunLauncher`**. Give those
-> run pods the same secrets — set `runLauncher.config.k8sRunLauncher.envSecrets`
-> (the `alphaos-minio-rw` + `alphaos-massive` secrets) in the Dagster Helm values,
-> so the launched pod sees the env, not just the gRPC code-location pod.
+> Each run launches its own pod via the chart's **`K8sRunLauncher`**. The
+> `market_data_daily` job already carries a `dagster-k8s/config` tag that scopes
+> its own run-pod config (see `marketdata/dagster_defs.py` → `K8S_RUN_CONFIG`):
+> it `env_from` the `alphaos-minio-rw` + `alphaos-massive` Secrets and sets
+> `MINIO_BUCKET=stocks-us`. So you do **not** add these to the global
+> `runLauncher…envSecrets` (which would inject them into every code location's run
+> pods and could clobber a shared `MINIO_*`); you only need the two Secrets to
+> **exist in the run launcher's `jobNamespace`** (e.g. `datasci`).
 >
-> The job tags its run pod with `dagster-k8s/config` requesting ~2 CPU / 4Gi and
-> limiting ~8 CPU / 16Gi (the minute build is the heavy stage — tune to observed
-> use). Do **not** set `readOnlyRootFilesystem: true` on the run pod: `build_bars`
-> writes a local build report under `/app/_audit` before uploading it to MinIO.
+> The same tag requests ~2 CPU / 4Gi and limits ~8 CPU / 16Gi (the minute build is
+> the heavy stage — tune to observed use). Do **not** set
+> `readOnlyRootFilesystem: true` on the run pod: `build_bars` writes a local build
+> report under `/app/_audit` before uploading it to MinIO.
 
 The **Dagster daemon** (already running, since your schedules work) fires the
 `market_data_daily_schedule` (`0 7 * * *` UTC — after the prior US session's

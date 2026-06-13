@@ -49,7 +49,21 @@ K8S_RUN_CONFIG = {
         "resources": {
             "requests": {"cpu": "2", "memory": "4Gi"},
             "limits": {"cpu": "8", "memory": "16Gi"},
-        }
+        },
+        # Inject MinIO (write-capable) + Massive creds into THIS job's run pods
+        # only, so other code locations' run pods are untouched (avoids clobbering
+        # any shared MINIO_* env on the global run launcher). The named Secrets
+        # must exist in the run launcher's jobNamespace (e.g. datasci):
+        #   alphaos-minio-rw -> MINIO_ENDPOINT_URL / MINIO_ACCESS_KEY_ID /
+        #                       MINIO_SECRET_ACCESS_KEY (write-capable)
+        #   alphaos-massive  -> MASSIVE_S3_ACCESS_KEY_ID / MASSIVE_S3_SECRET_ACCESS_KEY
+        "env_from": [
+            {"secret_ref": {"name": "alphaos-minio-rw"}},
+            {"secret_ref": {"name": "alphaos-massive"}},
+        ],
+        "env": [
+            {"name": "MINIO_BUCKET", "value": "stocks-us"},
+        ],
     }
 }
 
