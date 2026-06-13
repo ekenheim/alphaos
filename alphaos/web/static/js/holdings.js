@@ -34,6 +34,7 @@
       <td><b>${h.symbol || "—"}</b><div class="muted" style="font-size:11px">${h.name || ""}</div></td>
       <td>${h.isin || ""}</td>
       <td>${(h.asset_class || "").replace(/_/g, " ")}</td>
+      <td>${h.portfolio || "A"}</td>
       <td>${h.currency || ""}</td>
       <td>${A.fmtNum(h.quantity, 2)}</td>
       <td>${A.fmtNum(h.avg_price, 2)}</td>
@@ -60,7 +61,7 @@
       `<div class="subcard-title">${title} · ${A.fmtSEK(subVal)} · ${A.fmtPct(subWeight, 1)}</div>` +
       `<div class="table-wrap"><table>
         <thead><tr>
-          <th>Symbol</th><th>ISIN</th><th>Class</th><th>Ccy</th>
+          <th>Symbol</th><th>ISIN</th><th>Class</th><th>Portfolio</th><th>Ccy</th>
           <th>Qty</th><th>Avg price</th><th>Last price</th><th>Source</th>
           <th>Cost (SEK)</th><th>Market value (SEK)</th><th>Unrealized P/L (SEK)</th>
           <th>Weight</th><th>Acquired</th><th></th>
@@ -71,7 +72,10 @@
 
   function render() {
     if (!ALLOC) return;
-    $("h-total").textContent = "Total " + A.fmtSEK(ALLOC.total_gross_value);
+    const bp = ALLOC.by_portfolio || {};
+    const aw = bp.A ? ` · A ${A.fmtPct(bp.A.current_weight, 1)}` : "";
+    const bw = bp.B ? ` · B ${A.fmtPct(bp.B.current_weight, 1)}` : "";
+    $("h-total").textContent = "Total " + A.fmtSEK(ALLOC.total_gross_value) + aw + bw;
 
     const wrap = $("holdings-groups");
     wrap.innerHTML = "";
@@ -182,6 +186,7 @@
     const h = found.h;
     $("f-id").value = h.id;
     $("f-sleeve").value = found.code || "";
+    $("f-portfolio").value = h.portfolio || "A";
     $("f-symbol").value = h.symbol || "";
     $("f-isin").value = h.isin || "";
     $("f-name").value = h.name || "";
@@ -200,6 +205,7 @@
   function resetForm() {
     $("holding-form").reset();
     $("f-id").value = "";
+    $("f-portfolio").value = "A";
     $("f-currency").value = "SEK";
     $("form-title").textContent = "Add / update holding";
     $("edit-pill").classList.add("hidden");
@@ -230,6 +236,7 @@
     const body = {
       symbol: $("f-symbol").value.trim(),
       sleeve_code: $("f-sleeve").value || undefined,
+      portfolio: $("f-portfolio").value || undefined,
       isin: $("f-isin").value.trim() || undefined,
       name: $("f-name").value.trim() || undefined,
       asset_class: $("f-asset").value,

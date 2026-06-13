@@ -248,6 +248,7 @@ def current_risk(session: Session) -> dict[str, Any]:
         "forced_sale_dd": _f(cfg.forced_sale_dd),
         "belaningsgrad_cliff": _f(cfg.belaningsgrad_cliff),
         "reentry_recovery": _f(cfg.reentry_recovery),
+        "delever_floor_leverage": _f(cfg.delever_floor_leverage),
     }
     base = {
         "as_of": None,

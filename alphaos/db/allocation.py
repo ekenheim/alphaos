@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from .config import get_config
 from .fx import fx_to_sek
-from .models import AssetClass, Holding, PriceSource, Sleeve, SleeveKind
+from .models import AssetClass, Holding, Portfolio, PriceSource, Sleeve, SleeveKind
 
 _ZERO = Decimal("0")
 
@@ -44,6 +44,12 @@ def _as_source(src: PriceSource | str | None) -> PriceSource | None:
     if src is None:
         return None
     return src if isinstance(src, PriceSource) else PriceSource(str(src))
+
+
+def _as_portfolio(p: Portfolio | str | None) -> Portfolio | None:
+    if p is None:
+        return None
+    return p if isinstance(p, Portfolio) else Portfolio(str(p).upper())
 
 
 # --- Sleeves ---
@@ -146,6 +152,7 @@ def upsert_holding(
     isin: str | None = None,
     name: str | None = None,
     asset_class: AssetClass | str | None = None,
+    portfolio: Portfolio | str | None = None,
     currency: str | None = None,
     quantity: Any = None,
     avg_price: Any = None,
@@ -180,6 +187,9 @@ def upsert_holding(
         holding.name = name
     if asset_class is not None:
         holding.asset_class = _as_asset_class(asset_class)
+    p = _as_portfolio(portfolio)
+    if p is not None:
+        holding.portfolio = p
     if currency is not None:
         holding.currency = currency.upper()
     if quantity is not None:
@@ -318,6 +328,7 @@ def allocation(session: Session) -> dict[str, Any]:
             "name": h.name,
             "isin": h.isin,
             "asset_class": h.asset_class.value,
+            "portfolio": h.portfolio.value,
             "currency": h.currency,
             "quantity": float(_dec(h.quantity)),
             "avg_price": float(_dec(h.avg_price)),
@@ -354,11 +365,23 @@ def allocation(session: Session) -> dict[str, Any]:
     unassigned = by_sleeve.get(None, [])
     unassigned_val = sum((vals[h.id]["market_value"] for h in unassigned), _ZERO)
 
+    # Cohesive A+B rollup: total market value + weight per portfolio bucket.
+    by_portfolio: dict[str, dict[str, float]] = {}
+    for p in Portfolio:
+        p_val = sum(
+            (vals[h.id]["market_value"] for h in holdings if h.portfolio == p), _ZERO
+        )
+        by_portfolio[p.value] = {
+            "current_value": float(p_val),
+            "current_weight": float(p_val / total) if total > _ZERO else 0.0,
+        }
+
     return {
         "total_gross_value": float(total),
         "target_weight_sum": float(sum((_dec(s.target_weight) for s in sleeves), _ZERO)),
         "base_currency": cfg.base_currency,
         "sleeves": rows,
+        "by_portfolio": by_portfolio,
         "unassigned": {
             "current_value": float(unassigned_val),
             "current_weight": float(unassigned_val / total) if total > _ZERO else 0.0,

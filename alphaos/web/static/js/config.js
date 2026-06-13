@@ -7,8 +7,9 @@
   const FIELDS = [
     { k: "base_currency", l: "Base currency", t: "text", h: "SEK" },
     { k: "account_label", l: "Account label", t: "text", h: "Avanza ISK" },
-    { k: "leverage_target", l: "Leverage target", t: "num", h: "small-portfolio target, e.g. 1.30" },
-    { k: "leverage_floor", l: "Leverage floor", t: "num", h: "large-portfolio floor, e.g. 1.00" },
+    { k: "leverage_target", l: "Leverage target", t: "num", h: "running leverage now, e.g. 1.30 (→ 1.10 target)" },
+    { k: "leverage_floor", l: "Leverage floor (glide)", t: "num", h: "large-portfolio glide floor, e.g. 1.00" },
+    { k: "delever_floor_leverage", l: "De-lever floor leverage", t: "num", h: "level the -35/-45/-20 rule cuts TOWARD in a drawdown, e.g. 1.06 — not the running target" },
     { k: "glide_low_assets", l: "Glide low assets (SEK)", t: "num", h: "below ⇒ target leverage" },
     { k: "glide_high_assets", l: "Glide high assets (SEK)", t: "num", h: "at/above ⇒ floor leverage" },
     { k: "blended_rate", l: "Blended rate", t: "num", h: "fraction, e.g. 0.0234" },

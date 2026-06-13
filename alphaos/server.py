@@ -166,6 +166,7 @@ async def post_holding(request: Request) -> JSONResponse:
                 isin=body.get("isin"),
                 name=body.get("name"),
                 asset_class=body.get("asset_class"),
+                portfolio=body.get("portfolio"),
                 currency=body.get("currency"),
                 quantity=body.get("quantity"),
                 avg_price=body.get("avg_price"),

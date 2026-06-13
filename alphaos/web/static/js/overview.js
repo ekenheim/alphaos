@@ -63,7 +63,8 @@
 
     const lev = $("t-lev");
     lev.textContent = risk.effective_leverage != null ? A.fmtNum(risk.effective_leverage, 2) + "×" : "—";
-    $("t-lev-foot").textContent = "target " + (risk.target_leverage != null ? A.fmtNum(risk.target_leverage, 2) + "×" : "—");
+    $("t-lev-foot").textContent = "target " + (risk.target_leverage != null ? A.fmtNum(risk.target_leverage, 2) + "×" : "—") +
+      (th.delever_floor_leverage != null ? ` · de-lever floor ${A.fmtNum(th.delever_floor_leverage, 2)}×` : "");
     // Warn when running hotter than the glide-path target.
     if (risk.effective_leverage != null && risk.target_leverage != null) {
       lev.classList.toggle("warn", risk.effective_leverage > risk.target_leverage + 0.02);

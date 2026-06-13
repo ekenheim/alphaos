@@ -52,6 +52,12 @@ class SleeveKind(str, enum.Enum):
     other = "other"
 
 
+class Portfolio(str, enum.Enum):
+    """Which book a position belongs to in the cohesive A+B portfolio."""
+    A = "A"   # mechanical momentum core (levered)
+    B = "B"   # discretionary monster-hunt pilot (unlevered)
+
+
 class AssetClass(str, enum.Enum):
     equity = "equity"
     etf = "etf"
@@ -120,6 +126,10 @@ class PortfolioConfig(Base):
     delever_full_dd: Mapped[float] = mapped_column(RATIO, default=-0.45)
     reentry_recovery: Mapped[float] = mapped_column(RATIO, default=0.20)
     forced_sale_dd: Mapped[float] = mapped_column(RATIO, default=-0.57)
+    # Level the de-lever rule (-35/-45/-20) cuts leverage TOWARD in a drawdown.
+    # NOT the running target (leverage_target) and NOT the glide-path floor
+    # (leverage_floor, which is the large-portfolio target).
+    delever_floor_leverage: Mapped[float] = mapped_column(RATIO, default=1.06)
 
     external_reserve: Mapped[float] = mapped_column(MONEY, default=75_000)
     planning_cagr_low: Mapped[float] = mapped_column(RATIO, default=0.10)
@@ -167,6 +177,12 @@ class Holding(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     sleeve_id: Mapped[int | None] = mapped_column(
         ForeignKey("sleeves.id", ondelete="SET NULL"), index=True, default=None
+    )
+    # Which book this position belongs to (cohesive A+B portfolio). Defaults to A
+    # (the mechanical core); discretionary pilot names are tagged B.
+    portfolio: Mapped[Portfolio] = mapped_column(
+        Enum(Portfolio, name="portfolio_bucket"),
+        default=Portfolio.A, server_default="A", index=True,
     )
     symbol: Mapped[str] = mapped_column(String(32), index=True)
     isin: Mapped[str | None] = mapped_column(String(16), default=None)
