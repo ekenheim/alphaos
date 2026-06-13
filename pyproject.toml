@@ -32,6 +32,11 @@ dependencies = [
   "pandas>=2.1",          # read MinIO parquet
   "pyarrow>=15",          # parquet engine for pandas
   "yfinance>=0.2.40",     # Yahoo price fallback for non-US listings (EUR ETFs)
+  "duckdb>=1.0",          # marketdata pipeline: SQL-based bars build + pivot
+  "python-dotenv>=1.0",   # marketdata pipeline: local .env loading
+  "dagster>=1.7",         # market_data_daily code location (Dagster job/schedule)
+  "dagster-k8s>=0.23",    # per-run pod resources via the dagster-k8s/config tag
+  "dagster-postgres>=0.23",  # Dagster instance storage backend (Postgres)
 ]
 
 [project.optional-dependencies]
@@ -42,12 +47,14 @@ dev = [
 [project.scripts]
 alphaos = "alphaos.cli:main"
 alphaos-daily-snapshot = "alphaos.jobs:main"
+alphaos-ingest-massive = "marketdata.ingest_massive:main"
+alphaos-build-bars = "marketdata.build_bars:main"
 
 [project.urls]
 Documentation = "file://README.md"
 
 [tool.setuptools]
-packages = ["alphaos", "alphaos.db", "alphaos.tests"]
+packages = ["alphaos", "alphaos.db", "alphaos.tests", "marketdata"]
 include-package-data = true
 
 [tool.setuptools.package-data]

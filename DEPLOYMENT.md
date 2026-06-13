@@ -290,6 +290,101 @@ spec:
 > initContainer keeps the schema current). FX/MinIO refresh failures are
 > non-fatal — the snapshot is still derived from the ledgers + last cached prices.
 
+## Market-data pipeline (Dagster)
+
+The image also bundles the **`marketdata/`** package — the daily US-equities
+pipeline that **produces** the `bars/` corpus this app reads for US-stock pricing.
+It runs as a **Dagster** job (`market_data_daily`) in the cluster's existing
+Dagster deployment. Two ordered stages:
+
+1. **`ingest_massive`** (`marketdata.ingest_massive`) — pull Massive.com flatfiles →
+   upload raw `day_aggs_v1/` + `minute_aggs_v1/` csv.gz to MinIO → pivot to
+   per-ticker parquet. Idempotent, self-healing (checkpoint + 7-day gap-scan).
+2. **`build_bars`** (`marketdata.build_bars`) — build the Hive
+   `bars/tf=1day|1min|5min|15min/date=YYYY-MM-DD/part.parquet` corpus from the raw
+   flatfiles stage 1 landed. Idempotent (skips built partitions).
+
+> **This pipeline WRITES to MinIO** (raw csv.gz, parquet, `_meta.json`, the build
+> report, and `meta/_pivot_checkpoint.txt`). Unlike the app's read-only price
+> refresh, it needs **write-capable** MinIO credentials, plus **Massive.com**
+> credentials. The pipeline does **not** touch Postgres.
+
+Run a stage by hand (console scripts installed by `pip install .`):
+
+```bash
+alphaos-ingest-massive --dry-run        # list dates it would sync; touch nothing
+alphaos-build-bars --timeframes 1day --dry-run
+```
+
+### Environment / Secrets
+
+| Variable | Notes |
+|---|---|
+| `MINIO_ENDPOINT_URL` | S3 endpoint (e.g. `http://s3-lan.ekenhome.se:9000`) |
+| `MINIO_ACCESS_KEY_ID` | **write-capable** access key |
+| `MINIO_SECRET_ACCESS_KEY` | secret key |
+| `MINIO_BUCKET` | `stocks-us` |
+| `MASSIVE_S3_ACCESS_KEY_ID` | Massive.com flatfile access key |
+| `MASSIVE_S3_SECRET_ACCESS_KEY` | Massive.com flatfile secret key |
+
+Recommended Secrets (in your k8s/Flux repo): an `alphaos-minio-rw` (write creds) and
+a new `alphaos-massive`.
+
+### Deploy as a Dagster code location
+
+Register AlphaOS as a Dagster gRPC **user-deployment** pointed at the definitions
+module (Dagster Helm `dagster-user-deployments.deployments[]`, or your workspace):
+
+```yaml
+# Dagster Helm values (separate Flux repo) — illustrative
+dagster-user-deployments:
+  enabled: true
+  deployments:
+    - name: alphaos-marketdata
+      image:
+        repository: ghcr.io/ekenheim/alphaos
+        tag: latest
+      dagsterApiGrpcArgs: ["-m", "marketdata.dagster_defs"]
+      port: 4000
+      envSecrets:
+        - name: alphaos-minio-rw      # MINIO_ENDPOINT_URL / *_ACCESS_KEY_ID / *_SECRET_ACCESS_KEY
+        - name: alphaos-massive       # MASSIVE_S3_ACCESS_KEY_ID / MASSIVE_S3_SECRET_ACCESS_KEY
+      env:
+        - name: MINIO_BUCKET
+          value: stocks-us
+```
+
+> Each run launches its own pod via the chart's **`K8sRunLauncher`**. Give those
+> run pods the same secrets — set `runLauncher.config.k8sRunLauncher.envSecrets`
+> (the `alphaos-minio-rw` + `alphaos-massive` secrets) in the Dagster Helm values,
+> so the launched pod sees the env, not just the gRPC code-location pod.
+>
+> The job tags its run pod with `dagster-k8s/config` requesting ~2 CPU / 4Gi and
+> limiting ~8 CPU / 16Gi (the minute build is the heavy stage — tune to observed
+> use). Do **not** set `readOnlyRootFilesystem: true` on the run pod: `build_bars`
+> writes a local build report under `/app/_audit` before uploading it to MinIO.
+
+The **Dagster daemon** (already running, since your schedules work) fires the
+`market_data_daily_schedule` (`0 7 * * *` UTC — after the prior US session's
+Massive files publish, before the `alphaos-daily-snapshot` CronJob at `30 22`).
+Schedules load **stopped**; start it from the Dagster UI after the code location
+appears.
+
+### Backfills
+
+From the Dagster UI launchpad, override op config — no code change:
+
+```yaml
+ops:
+  build_bars_op:
+    config:
+      lookback_days: null     # null -> scan the entire raw archive
+      rebuild: false
+  ingest_massive_op:
+    config:
+      lookback_days: 3650
+```
+
 ## Future: LAN registry
 
 To later publish to an internal registry (e.g. `registry.ekenhome.se/alphaos`)
